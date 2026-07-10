@@ -12,6 +12,15 @@
 <p>Amount (tinybars): <input id="tinybars" value="100000"></p>
 
 <button onclick="testSignTransaction()">Test Sign Transaction (asymmetric transfer)</button>
+
+<hr>
+<h2>3-Hop Net-Zero Test (A -&gt; B -&gt; C, B nets to zero)</h2>
+<p>Account A (only pays out): <input id="acctA" value="0.0.10190152"></p>
+<p>Account B (pass-through, appears twice, nets to 0): <input id="acctB" value="0.0.10130162"></p>
+<p>Account C (only receives, third account required): <input id="acctC" value="0.0.REPLACE_WITH_ACCOUNT_C"></p>
+<p>Amount per hop (tinybars): <input id="hopTinybars" value="100000"></p>
+<button onclick="testThreeHop()">Test 3-Hop Net-Zero Transfer</button>
+
 <pre id="log"></pre>
 <script>
 function log(msg) {
@@ -48,6 +57,67 @@ async function testSignTransaction() {
       .catch(err => log("signTransaction() rejected: " + err.message));
   } catch (e) {
     log("Error building/sending transaction: " + e.message);
+    console.error(e);
+  }
+}
+
+async function testThreeHop() {
+  try {
+    const { TransferTransaction, AccountId, Hbar, TransactionId } = sdk;
+    const aStr = document.getElementById('acctA').value.trim();
+    const bStr = document.getElementById('acctB').value.trim();
+    const cStr = document.getElementById('acctC').value.trim();
+    const hop = Number(document.getElementById('hopTinybars').value.trim());
+
+    if (cStr.includes("REPLACE_WITH_ACCOUNT_C")) {
+      log("ERROR: set Account C to a real third account before running this test.");
+      return;
+    }
+    if (aStr === bStr || bStr === cStr || aStr === cStr) {
+      log("ERROR: A, B, and C must all be different accounts for this test to mean anything.");
+      return;
+    }
+
+    const A = AccountId.fromString(aStr);
+    const B = AccountId.fromString(bStr);
+    const C = AccountId.fromString(cStr);
+
+    log("Building 3-hop tx: A(" + aStr + ") -" + hop + " -> B(" + bStr + "), B -" + hop + " -> C(" + cStr + "). B should net to 0.");
+
+    const tx = new TransferTransaction()
+      .addHbarTransfer(A, Hbar.fromTinybars(-hop))   // A pays out
+      .addHbarTransfer(B, Hbar.fromTinybars(hop))    // B receives from A
+      .addHbarTransfer(B, Hbar.fromTinybars(-hop))   // B pays out to C (2nd entry for B)
+      .addHbarTransfer(C, Hbar.fromTinybars(hop))    // C receives
+      .setTransactionId(TransactionId.generate(A))
+      .setNodeAccountIds([AccountId.fromString("0.0.3")])
+      .freeze();
+
+    // Inspect what the SDK actually recorded for B BEFORE it ever reaches the wallet.
+    // If the SDK auto-merges same-account entries into one net value, we'll see it here.
+    try {
+      const transfersMap = tx.hbarTransfers;
+      log("SDK-level hbarTransfers after building (checking if B got merged):");
+      transfersMap.forEach((amount, acct) => {
+        log("  " + acct.toString() + " : " + amount.toString());
+      });
+    } catch (inspectErr) {
+      log("Could not inspect tx.hbarTransfers directly: " + inspectErr.message);
+    }
+
+    const bytes = tx.toBytes();
+    const base64Bytes = btoa(String.fromCharCode(...bytes));
+    log("Built transaction bytes (base64), length: " + base64Bytes.length);
+    log("Calling window.saucerswapWallet.signTransaction() — CHECK: does B appear twice, once, or not at all?");
+    if (!window.saucerswapWallet) {
+      log("saucerswapWallet not found on window.");
+      return;
+    }
+    window.saucerswapWallet.signTransaction(base64Bytes)
+      .then(result => log("signTransaction() resolved: " + JSON.stringify(result)))
+      .catch(err => log("signTransaction() rejected: " + err.message));
+  } catch (e) {
+    log("Error building/sending 3-hop transaction: " + e.message);
     console.error(e);
   }
 }
