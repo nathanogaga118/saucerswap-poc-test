@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html>
 <head>
@@ -6,7 +5,30 @@
 </head>
 <body>
 <h1>SaucerSwap Wallet — signTransaction() Display Accuracy Test</h1>
-<button onclick="testSignTransaction()">Test Sign Transaction (self-transfer 1 tinybar)</button>
+
+<p>
+  <strong>Sender (your test account):</strong>
+  <input id="senderId" value="0.0.10190152" size="16">
+</p>
+<p>
+  <strong>Recipient (a DIFFERENT account you control):</strong>
+  <input id="recipientId" value="0.0.REPLACE_ME" size="16">
+</p>
+<p>
+  <strong>Amount (tinybars):</strong>
+  <select id="amountTinybars">
+    <option value="1">1 tinybar (0.00000001 ℏ) — smallest unit</option>
+    <option value="100">100 tinybars (0.000001 ℏ)</option>
+    <option value="10000">10,000 tinybars (0.0001 ℏ)</option>
+    <option value="100000" selected>100,000 tinybars (0.001 ℏ)</option>
+    <option value="1000000">1,000,000 tinybars (0.01 ℏ)</option>
+    <option value="100000000">100,000,000 tinybars (1 ℏ) — sanity check, should always render fine</option>
+  </select>
+</p>
+
+<button onclick="testSignTransaction()">Test Sign Transaction (asymmetric transfer)</button>
+<button onclick="runFullSweep()">Run Full Sweep (all amounts, one after another)</button>
+
 <pre id="log"></pre>
 
 <script>
@@ -14,41 +36,79 @@ function log(msg) {
   document.getElementById('log').textContent += new Date().toISOString() + " - " + msg + "\n";
 }
 
+async function buildAndSign(sender, recipient, tinybars) {
+  const { TransferTransaction, AccountId, Hbar, TransactionId } = sdk;
+
+  const senderAcct = AccountId.fromString(sender);
+  const recipientAcct = AccountId.fromString(recipient);
+
+  log(`Building transfer: ${sender} -> ${recipient}, amount = ${tinybars} tinybar(s)`);
+
+  const tx = new TransferTransaction()
+    .addHbarTransfer(senderAcct, Hbar.fromTinybars(-tinybars))
+    .addHbarTransfer(recipientAcct, Hbar.fromTinybars(tinybars))
+    .setTransactionId(TransactionId.generate(senderAcct))
+    .setNodeAccountIds([AccountId.fromString("0.0.3")])
+    .freeze();
+
+  const bytes = tx.toBytes();
+  const base64Bytes = btoa(String.fromCharCode(...bytes));
+  log("Built transaction bytes (base64), length: " + base64Bytes.length);
+
+  if (!window.saucerswapWallet) {
+    log("saucerswapWallet not found on window. Aborting.");
+    return;
+  }
+
+  log("Calling window.saucerswapWallet.signTransaction() — CHECK THE APPROVAL SHEET NOW:");
+  log("  -> Does it show recipient " + recipient + " (not sender)?");
+  log("  -> Does it show " + tinybars + " tinybar(s) accurately, or does it round/truncate to 0?");
+
+  try {
+    const result = await window.saucerswapWallet.signTransaction(base64Bytes);
+    log("signTransaction() resolved: " + JSON.stringify(result));
+  } catch (err) {
+    log("signTransaction() rejected: " + err.message);
+  }
+}
+
 async function testSignTransaction() {
   try {
-    const { TransferTransaction, AccountId, Hbar, TransactionId } = sdk;
+    const sender = document.getElementById('senderId').value.trim();
+    const recipient = document.getElementById('recipientId').value.trim();
+    const tinybars = parseInt(document.getElementById('amountTinybars').value, 10);
 
-    // Use YOUR OWN test account for both sides — net-zero self-transfer, no real value movement
-    const myAccount = AccountId.fromString("0.0.10190152"); // replace with your actual test account
-
-    log("Building test transaction: self-transfer of 1 tinybar...");
-
-    const tx = new TransferTransaction()
-      .addHbarTransfer(myAccount, Hbar.fromTinybars(-1))
-      .addHbarTransfer(myAccount, Hbar.fromTinybars(1))
-      .setTransactionId(TransactionId.generate(myAccount))
-      .setNodeAccountIds([AccountId.fromString("0.0.3")]) // a real testnet/mainnet node id, required to freeze without a Client
-      .freeze();
-
-    const bytes = tx.toBytes();
-    const base64Bytes = btoa(String.fromCharCode(...bytes));
-
-    log("Built transaction bytes (base64), length: " + base64Bytes.length);
-    log("Calling window.saucerswapWallet.signTransaction()...");
-
-    if (!window.saucerswapWallet) {
-      log("saucerswapWallet not found on window.");
+    if (recipient.includes("REPLACE_ME")) {
+      log("ERROR: set the recipient account ID field first — it must differ from the sender.");
+      return;
+    }
+    if (sender === recipient) {
+      log("ERROR: sender and recipient are the same account. This defeats the test (net-zero on one account). Use two different accounts.");
       return;
     }
 
-    window.saucerswapWallet.signTransaction(base64Bytes)
-      .then(result => log("signTransaction() resolved: " + JSON.stringify(result)))
-      .catch(err => log("signTransaction() rejected: " + err.message));
-
+    await buildAndSign(sender, recipient, tinybars);
   } catch (e) {
     log("Error building/sending transaction: " + e.message);
     console.error(e);
   }
+}
+
+async function runFullSweep() {
+  const sender = document.getElementById('senderId').value.trim();
+  const recipient = document.getElementById('recipientId').value.trim();
+  if (recipient.includes("REPLACE_ME") || sender === recipient) {
+    log("ERROR: fix sender/recipient fields before running the sweep.");
+    return;
+  }
+  const amounts = [1, 100, 10000, 100000, 1000000, 100000000];
+  for (const amt of amounts) {
+    log("--- Sweep step: " + amt + " tinybars. Approve/reject in the wallet, then this will continue. ---");
+    await buildAndSign(sender, recipient, amt);
+    // Small pause so you have time to read the sheet before the next prompt fires
+    await new Promise(r => setTimeout(r, 3000));
+  }
+  log("Sweep complete. Compare which amounts rendered accurately vs which showed 0 / rounded.");
 }
 </script>
 </body>
