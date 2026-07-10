@@ -1,178 +1,56 @@
+
 <!DOCTYPE html>
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <script src="https://unpkg.com/@hiero-ledger/sdk@2.70.0/dist/umd.js"></script>
-<style>
-  * { box-sizing: border-box; }
-  body {
-    font-family: -apple-system, Roboto, sans-serif;
-    background: #111;
-    color: #eee;
-    padding: 16px;
-    font-size: 16px;
-  }
-  h1 { font-size: 18px; }
-  label { display: block; margin-top: 14px; font-weight: bold; }
-  input, select {
-    width: 100%;
-    padding: 12px;
-    font-size: 16px;
-    margin-top: 6px;
-    border-radius: 8px;
-    border: 1px solid #555;
-    background: #222;
-    color: #eee;
-  }
-  button {
-    width: 100%;
-    padding: 16px;
-    font-size: 16px;
-    margin-top: 14px;
-    border-radius: 8px;
-    border: none;
-    background: #2a7a5a;
-    color: white;
-    font-weight: bold;
-  }
-  button:active { background: #1e5c43; }
-  #tapCheck {
-    margin-top: 10px;
-    padding: 8px;
-    background: #333;
-    border-radius: 6px;
-    font-size: 13px;
-  }
-  #log {
-    margin-top: 16px;
-    padding: 10px;
-    background: #000;
-    border: 1px solid #444;
-    border-radius: 8px;
-    white-space: pre-wrap;
-    word-break: break-all;
-    font-size: 12px;
-    min-height: 100px;
-  }
-</style>
 </head>
 <body>
 <h1>SaucerSwap Wallet — signTransaction() Display Accuracy Test</h1>
 
-<div id="tapCheck">Tap check: taps registered = <span id="tapCount">0</span></div>
+<p>Sender: <input id="senderId" value="0.0.10190152"></p>
+<p>Recipient (different account): <input id="recipientId" value="0.0.10130162"></p>
+<p>Amount (tinybars): <input id="tinybars" value="100000"></p>
 
-<label for="senderId">Sender (your test account)</label>
-<input id="senderId" value="0.0.10190152">
-
-<label for="recipientId">Recipient (a DIFFERENT account you control)</label>
-<input id="recipientId" value="0.0.10130162">
-
-<label for="amountTinybars">Amount</label>
-<select id="amountTinybars">
-  <option value="1">1 tinybar (0.00000001 ℏ) — smallest unit</option>
-  <option value="100">100 tinybars (0.000001 ℏ)</option>
-  <option value="10000">10,000 tinybars (0.0001 ℏ)</option>
-  <option value="100000" selected>100,000 tinybars (0.001 ℏ)</option>
-  <option value="1000000">1,000,000 tinybars (0.01 ℏ)</option>
-  <option value="100000000">100,000,000 tinybars (1 ℏ) — sanity check</option>
-</select>
-
-<button id="testBtn" type="button">Test Sign Transaction (asymmetric transfer)</button>
-<button id="sweepBtn" type="button">Run Full Sweep (all amounts, one after another)</button>
-
-<pre id="log">Log output will appear here...</pre>
-
+<button onclick="testSignTransaction()">Test Sign Transaction (asymmetric transfer)</button>
+<pre id="log"></pre>
 <script>
 function log(msg) {
   document.getElementById('log').textContent += new Date().toISOString() + " - " + msg + "\n";
 }
-
-async function buildAndSign(sender, recipient, tinybars) {
-  const { TransferTransaction, AccountId, Hbar, TransactionId } = sdk;
-
-  const senderAcct = AccountId.fromString(sender);
-  const recipientAcct = AccountId.fromString(recipient);
-
-  log(`Building transfer: ${sender} -> ${recipient}, amount = ${tinybars} tinybar(s)`);
-
-  const tx = new TransferTransaction()
-    .addHbarTransfer(senderAcct, Hbar.fromTinybars(-tinybars))
-    .addHbarTransfer(recipientAcct, Hbar.fromTinybars(tinybars))
-    .setTransactionId(TransactionId.generate(senderAcct))
-    .setNodeAccountIds([AccountId.fromString("0.0.3")])
-    .freeze();
-
-  const bytes = tx.toBytes();
-  const base64Bytes = btoa(String.fromCharCode(...bytes));
-  log("Built transaction bytes (base64), length: " + base64Bytes.length);
-
-  if (!window.saucerswapWallet) {
-    log("saucerswapWallet not found on window. Aborting.");
-    return;
-  }
-
-  log("Calling window.saucerswapWallet.signTransaction() — CHECK THE APPROVAL SHEET NOW:");
-  log("  -> Does it show recipient " + recipient + " (not sender)?");
-  log("  -> Does it show " + tinybars + " tinybar(s) accurately, or does it round/truncate to 0?");
-
-  try {
-    const result = await window.saucerswapWallet.signTransaction(base64Bytes);
-    log("signTransaction() resolved: " + JSON.stringify(result));
-  } catch (err) {
-    log("signTransaction() rejected: " + err.message);
-  }
-}
-
 async function testSignTransaction() {
   try {
-    const sender = document.getElementById('senderId').value.trim();
-    const recipient = document.getElementById('recipientId').value.trim();
-    const tinybars = parseInt(document.getElementById('amountTinybars').value, 10);
+    const { TransferTransaction, AccountId, Hbar, TransactionId } = sdk;
+    const senderStr = document.getElementById('senderId').value.trim();
+    const recipientStr = document.getElementById('recipientId').value.trim();
+    const tinybars = parseInt(document.getElementById('tinybars').value.trim(), 10);
 
-    if (recipient.includes("0.0.10130162")) {
-      log("ERROR: set the recipient account ID field first — it must differ from the sender.");
+    const senderAcct = AccountId.fromString(senderStr);
+    const recipientAcct = AccountId.fromString(recipientStr);
+
+    log("Building test transaction: " + senderStr + " -> " + recipientStr + ", " + tinybars + " tinybar(s)...");
+    const tx = new TransferTransaction()
+      .addHbarTransfer(senderAcct, Hbar.fromTinybars(-tinybars))
+      .addHbarTransfer(recipientAcct, Hbar.fromTinybars(tinybars))
+      .setTransactionId(TransactionId.generate(senderAcct))
+      .setNodeAccountIds([AccountId.fromString("0.0.3")]) // a real testnet/mainnet node id, required to freeze without a Client
+      .freeze();
+    const bytes = tx.toBytes();
+    const base64Bytes = btoa(String.fromCharCode(...bytes));
+    log("Built transaction bytes (base64), length: " + base64Bytes.length);
+    log("Calling window.saucerswapWallet.signTransaction()...");
+    if (!window.saucerswapWallet) {
+      log("saucerswapWallet not found on window.");
       return;
     }
-    if (sender === recipient) {
-      log("ERROR: sender and recipient are the same account. This defeats the test (net-zero on one account). Use two different accounts.");
-      return;
-    }
-
-    await buildAndSign(sender, recipient, tinybars);
+    window.saucerswapWallet.signTransaction(base64Bytes)
+      .then(result => log("signTransaction() resolved: " + JSON.stringify(result)))
+      .catch(err => log("signTransaction() rejected: " + err.message));
   } catch (e) {
     log("Error building/sending transaction: " + e.message);
     console.error(e);
   }
 }
-
-async function runFullSweep() {
-  const sender = document.getElementById('senderId').value.trim();
-  const recipient = document.getElementById('recipientId').value.trim();
-  if (recipient.includes("REPLACE_ME") || sender === recipient) {
-    log("ERROR: fix sender/recipient fields before running the sweep.");
-    return;
-  }
-  const amounts = [1, 100, 10000, 100000, 1000000, 100000000];
-  for (const amt of amounts) {
-    log("--- Sweep step: " + amt + " tinybars. Approve/reject in the wallet, then this will continue. ---");
-    await buildAndSign(sender, recipient, amt);
-    // Small pause so you have time to read the sheet before the next prompt fires
-    await new Promise(r => setTimeout(r, 3000));
-  }
-  log("Sweep complete. Compare which amounts rendered accurately vs which showed 0 / rounded.");
-}
-
-// Tap-registration sanity check: confirms the page is receiving touches at all
-let tapCount = 0;
-document.body.addEventListener('touchend', () => {
-  tapCount++;
-  document.getElementById('tapCount').textContent = tapCount;
-});
-
-// Bind buttons via addEventListener instead of inline onclick —
-// some in-app/dApp WebViews restrict inline event handlers (CSP or otherwise)
-document.getElementById('testBtn').addEventListener('click', testSignTransaction);
-document.getElementById('sweepBtn').addEventListener('click', runFullSweep);
 </script>
 </body>
 </html>
