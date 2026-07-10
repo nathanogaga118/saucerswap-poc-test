@@ -1,10 +1,12 @@
+
 <!DOCTYPE html>
 <html>
+<head>
+<script src="https://unpkg.com/@hiero-ledger/sdk@2.70.0/dist/umd.js"></script>
+</head>
 <body>
-<h1>SaucerSwap Wallet Bridge PoC — Domain Spoof Test</h1>
-<button onclick="testNormalSign()">1. Baseline: Normal Sign</button>
-<button onclick="testRedirectSign()">2. Sign + Immediate Redirect</button>
-<button onclick="testTitleSpoof()">3. Sign + Title Change</button>
+<h1>SaucerSwap Wallet — signTransaction() Display Accuracy Test</h1>
+<button onclick="testSignTransaction()">Test Sign Transaction (self-transfer 1 tinybar)</button>
 <pre id="log"></pre>
 
 <script>
@@ -12,38 +14,41 @@ function log(msg) {
   document.getElementById('log').textContent += new Date().toISOString() + " - " + msg + "\n";
 }
 
-// Test 1: baseline, same as before, for comparison
-function testNormalSign() {
-  log("Baseline call from: " + window.location.href);
-  window.saucerswapWallet.signMessage("Baseline test - normal call, no manipulation")
-    .then(r => log("resolved: " + JSON.stringify(r)))
-    .catch(e => log("rejected: " + e.message));
-}
+async function testSignTransaction() {
+  try {
+    const { TransferTransaction, AccountId, Hbar, TransactionId } = sdk;
 
-// Test 2: call signMessage, then immediately navigate away
-// This tests whether the approval sheet captures the URL at call-time
-// (correct) or at some later render-time (potentially stale/wrong)
-function testRedirectSign() {
-  log("Calling signMessage from: " + window.location.href);
-  window.saucerswapWallet.signMessage("Redirect test - page will navigate immediately after this call")
-    .then(r => log("resolved: " + JSON.stringify(r)))
-    .catch(e => log("rejected: " + e.message));
+    // Use YOUR OWN test account for both sides — net-zero self-transfer, no real value movement
+    const myAccount = AccountId.fromString("0.0.10190152"); // replace with your actual test account
 
-  // Redirect immediately after firing the request, before any response
-  setTimeout(function() {
-    log("Navigating away now...");
-    window.location.href = window.location.origin + "/decoy.html";
-  }, 50); // small delay just to ensure the postMessage had a chance to fire first
-}
+    log("Building test transaction: self-transfer of 1 tinybar...");
 
-// Test 3: change the page title right before calling, in case the
-// sheet derives any display info from page metadata rather than the real URL
-function testTitleSpoof() {
-  document.title = "totally-legit-safe-dapp.com (Official)";
-  log("Changed document.title, now calling signMessage...");
-  window.saucerswapWallet.signMessage("Title spoof test")
-    .then(r => log("resolved: " + JSON.stringify(r)))
-    .catch(e => log("rejected: " + e.message));
+    const tx = new TransferTransaction()
+      .addHbarTransfer(myAccount, Hbar.fromTinybars(-1))
+      .addHbarTransfer(myAccount, Hbar.fromTinybars(1))
+      .setTransactionId(TransactionId.generate(myAccount))
+      .setNodeAccountIds([AccountId.fromString("0.0.3")]) // a real testnet/mainnet node id, required to freeze without a Client
+      .freeze();
+
+    const bytes = tx.toBytes();
+    const base64Bytes = btoa(String.fromCharCode(...bytes));
+
+    log("Built transaction bytes (base64), length: " + base64Bytes.length);
+    log("Calling window.saucerswapWallet.signTransaction()...");
+
+    if (!window.saucerswapWallet) {
+      log("saucerswapWallet not found on window.");
+      return;
+    }
+
+    window.saucerswapWallet.signTransaction(base64Bytes)
+      .then(result => log("signTransaction() resolved: " + JSON.stringify(result)))
+      .catch(err => log("signTransaction() rejected: " + err.message));
+
+  } catch (e) {
+    log("Error building/sending transaction: " + e.message);
+    console.error(e);
+  }
 }
 </script>
 </body>
