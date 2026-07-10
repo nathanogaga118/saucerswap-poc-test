@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<body>
+<h1>SaucerSwap Wallet Bridge PoC Test Page</h1>
+<button onclick="testConnect()">Test Connect</button>
+<button onclick="testSign()">Test Sign Message</button>
+<pre id="log"></pre>
+
+<script>
+function log(msg) {
+  document.getElementById('log').textContent += msg + "\n";
+}
+
+function testConnect() {
+  log("Calling window.saucerswapWallet.connect()...");
+  if (!window.saucerswapWallet) {
+    log("saucerswapWallet not found on window.");
+    return;
+  }
+  window.saucerswapWallet.connect()
+    .then(result => log("connect() resolved: " + JSON.stringify(result)))
+    .catch(err => log("connect() rejected: " + err.message));
+}
+
+function testSign() {
+  log("Calling window.saucerswapWallet.signMessage()...");
+  window.saucerswapWallet.signMessage("PoC test message - harmless, for security research only")
+    .then(result => log("signMessage() resolved: " + JSON.stringify(result)))
+    .catch(err => log("signMessage() rejected: " + err.message));
+}
+</script>
+</body>
+</html>
