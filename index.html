@@ -44,12 +44,13 @@ const logEl = document.getElementById('log');
 function log(...args) {
   logEl.textContent += '\n' + args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : a).join(' ');
   logEl.scrollTop = logEl.scrollHeight;
-  console.log(...args);
 }
 
-// Report bridge presence immediately on page load — this itself is evidence
-// for the injection-scope question (does the bridge exist on any page loaded
-// in this WebView, not just saucerswap.finance?).
+window.onerror = function(msg, src, line, col) {
+  log('GLOBAL ERROR: ' + msg + ' at line ' + line + ':' + col);
+  return false;
+};
+
 window.addEventListener('load', () => {
   log('Page loaded. window.saucerswapWallet present:', typeof window.saucerswapWallet !== 'undefined');
   log('window.hashpack present:', typeof window.hashpack !== 'undefined');
@@ -69,6 +70,8 @@ document.getElementById('btnDebugSdk').addEventListener('click', () => {
     }
   });
 });
+
+document.getElementById('btnCheck').addEventListener('click', () => {
   if (typeof window.saucerswapWallet === 'undefined') {
     log('NOT FOUND: window.saucerswapWallet is not injected on this page.');
     log('This means the bridge is likely scoped to specific domains only.');
