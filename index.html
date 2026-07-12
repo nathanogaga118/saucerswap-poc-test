@@ -1,156 +1,135 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8" />
-<title>SaucerSwap Allowance Display PoC</title>
-<script src="https://unpkg.com/@hashgraph/sdk@2.53.0/dist/umd.js"></script>
-<style>
-  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
-  button { padding: 10px 16px; margin: 6px 6px 6px 0; cursor: pointer; }
-  #qrcode { margin: 16px 0; }
-  #log { white-space: pre-wrap; background: #111; color: #0f0; padding: 12px; border-radius: 6px; font-size: 12px; max-height: 300px; overflow-y: auto; }
-  input { padding: 6px; width: 100%; box-sizing: border-box; margin: 4px 0; }
-  label { font-size: 13px; font-weight: bold; }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<script src="https://unpkg.com/@hiero-ledger/sdk@2.70.0/dist/umd.js"></script>
 </head>
 <body>
+<h1>SaucerSwap Wallet — signTransaction() Display Accuracy Test</h1>
 
-<h2>SaucerSwap AccountAllowanceApproveTransaction PoC</h2>
-<p>Authorized security research — Hedera <b>testnet</b> only. This builds an allowance approval with a near-INT64_MAX amount to inspect how the SaucerSwap wallet displays it on the signing screen.</p>
+<p>Sender: <input id="senderId" value="0.0.10190152"></p>
+<p>Recipient (different account): <input id="recipientId" value="0.0.10130162"></p>
+<p>Amount (tinybars): <input id="tinybars" value="100000"></p>
 
-<label>Owner Account ID (your test wallet, e.g. 0.0.xxxxx)</label>
-<input id="ownerId" placeholder="0.0.10190152" value="0.0.10190152" />
+<button onclick="testSignTransaction()">Test Sign Transaction (asymmetric transfer)</button>
 
-<label>Spender Account ID (the "approved" account)</label>
-<input id="spenderId" placeholder="0.0.xxxxx" />
+<hr>
+<h2>3-Hop Net-Zero Test (A -&gt; B -&gt; C, B nets to zero)</h2>
+<p>Account A (only pays out): <input id="acctA" value="0.0.10190152"></p>
+<p>Account B (pass-through, appears twice, nets to 0): <input id="acctB" value="0.0.10130162"></p>
+<p>Account C (only receives, third account required): <input id="acctC" value="0.0.REPLACE_WITH_ACCOUNT_C"></p>
+<p>Amount per hop (tinybars): <input id="hopTinybars" value="100000"></p>
+<button onclick="testThreeHop()">Test 3-Hop Net-Zero Transfer</button>
 
-<label>Token ID (leave blank to test HBAR allowance instead)</label>
-<input id="tokenId" placeholder="0.0.xxxxx (optional)" />
-
-<label>Approval Amount (default = INT64_MAX, i.e. effectively unlimited)</label>
-<input id="amount" value="9223372036854775807" />
-
-<div>
-  <button id="btnCheck">1. Check for injected wallet bridge</button>
-  <button id="btnConnect" disabled>2. Call saucerswapWallet.connect()</button>
-  <button id="btnDebugSdk">Debug: Find SDK global name</button>
-  <button id="btnSend" disabled>3. Build & Send Allowance Approval</button>
-</div>
-
-<pre id="log">Waiting...</pre>
-
+<pre id="log"></pre>
 <script>
-const logEl = document.getElementById('log');
-function log(...args) {
-  logEl.textContent += '\n' + args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : a).join(' ');
-  logEl.scrollTop = logEl.scrollHeight;
+function log(msg) {
+  document.getElementById('log').textContent += new Date().toISOString() + " - " + msg + "\n";
+}
+async function testSignTransaction() {
+  try {
+    const { TransferTransaction, AccountId, Hbar, TransactionId } = sdk;
+    const senderStr = document.getElementById('senderId').value.trim();
+    const recipientStr = document.getElementById('recipientId').value.trim();
+    const rawAmount = document.getElementById('tinybars').value.trim();
+
+    let tinybars;
+    try {
+      tinybars = BigInt(rawAmount);
+    } catch (parseErr) {
+      log("ERROR: could not parse '" + rawAmount + "' as BigInt: " + parseErr.message);
+      return;
+    }
+    log("Parsed amount as BigInt (exact, no float rounding): " + tinybars.toString());
+
+    const senderAcct = AccountId.fromString(senderStr);
+    const recipientAcct = AccountId.fromString(recipientStr);
+
+    log("Building test transaction: " + senderStr + " -> " + recipientStr + ", " + tinybars.toString() + " tinybar(s)...");
+    // Pass as strings (not Number) so the SDK's own parser preserves full precision.
+    const tx = new TransferTransaction()
+      .addHbarTransfer(senderAcct, Hbar.fromTinybars((-tinybars).toString()))
+      .addHbarTransfer(recipientAcct, Hbar.fromTinybars(tinybars.toString()))
+      .setTransactionId(TransactionId.generate(senderAcct))
+      .setNodeAccountIds([AccountId.fromString("0.0.3")]) // a real testnet/mainnet node id, required to freeze without a Client
+      .freeze();
+    const bytes = tx.toBytes();
+    const base64Bytes = btoa(String.fromCharCode(...bytes));
+    log("Built transaction bytes (base64), length: " + base64Bytes.length);
+    log("Calling window.saucerswapWallet.signTransaction()...");
+    if (!window.saucerswapWallet) {
+      log("saucerswapWallet not found on window.");
+      return;
+    }
+    window.saucerswapWallet.signTransaction(base64Bytes)
+      .then(result => log("signTransaction() resolved: " + JSON.stringify(result)))
+      .catch(err => log("signTransaction() rejected: " + err.message));
+  } catch (e) {
+    log("Error building/sending transaction: " + e.message);
+    console.error(e);
+  }
 }
 
-window.onerror = function(msg, src, line, col) {
-  log('GLOBAL ERROR: ' + msg + ' at line ' + line + ':' + col);
-  return false;
-};
+async function testThreeHop() {
+  try {
+    const { TransferTransaction, AccountId, Hbar, TransactionId } = sdk;
+    const aStr = document.getElementById('acctA').value.trim();
+    const bStr = document.getElementById('acctB').value.trim();
+    const cStr = document.getElementById('acctC').value.trim();
+    const hop = Number(document.getElementById('hopTinybars').value.trim());
 
-window.addEventListener('load', () => {
-  log('Page loaded. window.saucerswapWallet present:', typeof window.saucerswapWallet !== 'undefined');
-  log('window.hashpack present:', typeof window.hashpack !== 'undefined');
-  log('Page origin:', window.location.origin);
-});
-
-document.getElementById('btnDebugSdk').addEventListener('click', () => {
-  const matches = Object.keys(window).filter(k => /^sdk$|hedera|hashgraph/i.test(k));
-  log('Matching window globals:', matches.length ? matches : '(none found)');
-  matches.forEach(k => {
-    try {
-      const val = window[k];
-      const innerKeys = val && typeof val === 'object' ? Object.keys(val).slice(0, 20) : typeof val;
-      log(`window.${k} ->`, innerKeys);
-    } catch (e) {
-      log(`window.${k} -> (error reading: ${e.message})`);
+    if (cStr.includes("REPLACE_WITH_ACCOUNT_C")) {
+      log("ERROR: set Account C to a real third account before running this test.");
+      return;
     }
-  });
-});
-
-document.getElementById('btnCheck').addEventListener('click', () => {
-  if (typeof window.saucerswapWallet === 'undefined') {
-    log('NOT FOUND: window.saucerswapWallet is not injected on this page.');
-    log('This means the bridge is likely scoped to specific domains only.');
-    return;
-  }
-  log('FOUND: window.saucerswapWallet is injected on this page.');
-  log('isSaucerSwap flag:', window.saucerswapWallet.isSaucerSwap);
-  document.getElementById('btnConnect').disabled = false;
-});
-
-document.getElementById('btnConnect').addEventListener('click', async () => {
-  try {
-    log('Calling window.saucerswapWallet.connect() ...');
-    const result = await window.saucerswapWallet.connect();
-    log('Connect result:', result);
-    document.getElementById('btnSend').disabled = false;
-  } catch (err) {
-    log('Connect error:', err.message || err);
-  }
-});
-
-document.getElementById('btnSend').addEventListener('click', async () => {
-  try {
-    const ownerId = document.getElementById('ownerId').value.trim();
-    const spenderId = document.getElementById('spenderId').value.trim();
-    const tokenId = document.getElementById('tokenId').value.trim();
-    const amount = document.getElementById('amount').value.trim();
-
-    if (!ownerId || !spenderId) {
-      log('Owner and Spender account IDs are required.');
+    if (aStr === bStr || bStr === cStr || aStr === cStr) {
+      log("ERROR: A, B, and C must all be different accounts for this test to mean anything.");
       return;
     }
 
-    const { AccountAllowanceApproveTransaction, AccountId, TokenId, Hbar, TransactionId } = window.sdk;
+    const A = AccountId.fromString(aStr);
+    const B = AccountId.fromString(bStr);
+    const C = AccountId.fromString(cStr);
 
-    const tx = new AccountAllowanceApproveTransaction();
+    log("Building 3-hop tx: A(" + aStr + ") -" + hop + " -> B(" + bStr + "), B -" + hop + " -> C(" + cStr + "). B should net to 0.");
 
-    if (tokenId) {
-      // Token allowance path — mirrors the ERC20 "unlimited approval" pattern
-      tx.approveTokenAllowance(
-        TokenId.fromString(tokenId),
-        AccountId.fromString(ownerId),
-        AccountId.fromString(spenderId),
-        BigInt(amount)
-      );
-      log('Building TOKEN allowance approval:', { tokenId, ownerId, spenderId, amount });
-    } else {
-      // HBAR allowance path
-      tx.approveHbarAllowance(
-        AccountId.fromString(ownerId),
-        AccountId.fromString(spenderId),
-        Hbar.fromTinybars(amount)
-      );
-      log('Building HBAR allowance approval:', { ownerId, spenderId, amountTinybars: amount });
+    const tx = new TransferTransaction()
+      .addHbarTransfer(A, Hbar.fromTinybars(-hop))   // A pays out
+      .addHbarTransfer(B, Hbar.fromTinybars(hop))    // B receives from A
+      .addHbarTransfer(B, Hbar.fromTinybars(-hop))   // B pays out to C (2nd entry for B)
+      .addHbarTransfer(C, Hbar.fromTinybars(hop))    // C receives
+      .setTransactionId(TransactionId.generate(A))
+      .setNodeAccountIds([AccountId.fromString("0.0.3")])
+      .freeze();
+
+    // Inspect what the SDK actually recorded for B BEFORE it ever reaches the wallet.
+    // If the SDK auto-merges same-account entries into one net value, we'll see it here.
+    try {
+      const transfersMap = tx.hbarTransfers;
+      log("SDK-level hbarTransfers after building (checking if B got merged):");
+      transfersMap.forEach((amount, acct) => {
+        log("  " + acct.toString() + " : " + amount.toString());
+      });
+    } catch (inspectErr) {
+      log("Could not inspect tx.hbarTransfers directly: " + inspectErr.message);
     }
 
-    tx.setTransactionId(TransactionId.generate(AccountId.fromString(ownerId)));
-    tx.setNodeAccountIds([new AccountId(3)]); // testnet node 0.0.3
-    tx.freeze();
-
-    const txBytes = tx.toBytes();
-    const txBase64 = btoa(String.fromCharCode(...txBytes));
-
-    log('Transaction built. Calling window.saucerswapWallet.signTransaction() directly...');
-
-    const result = await window.saucerswapWallet.signTransaction(txBase64);
-
-    log('Wallet responded:', result);
-    log('---');
-    log('NOW CHECK: What did the SaucerSwap confirmation screen show?');
-    log('- Was the amount displayed as a raw huge number with no warning?');
-    log('- Was there any "unlimited" / high-risk indicator?');
-    log('- Screenshot the signing screen for your report.');
-
-  } catch (err) {
-    log('Send error:', err.message || err);
+    const bytes = tx.toBytes();
+    const base64Bytes = btoa(String.fromCharCode(...bytes));
+    log("Built transaction bytes (base64), length: " + base64Bytes.length);
+    log("Calling window.saucerswapWallet.signTransaction() — CHECK: does B appear twice, once, or not at all?");
+    if (!window.saucerswapWallet) {
+      log("saucerswapWallet not found on window.");
+      return;
+    }
+    window.saucerswapWallet.signTransaction(base64Bytes)
+      .then(result => log("signTransaction() resolved: " + JSON.stringify(result)))
+      .catch(err => log("signTransaction() rejected: " + err.message));
+  } catch (e) {
+    log("Error building/sending 3-hop transaction: " + e.message);
+    console.error(e);
   }
-});
+}
 </script>
-
 </body>
 </html>
