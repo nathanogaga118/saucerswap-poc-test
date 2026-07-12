@@ -33,6 +33,7 @@
 <div>
   <button id="btnCheck">1. Check for injected wallet bridge</button>
   <button id="btnConnect" disabled>2. Call saucerswapWallet.connect()</button>
+  <button id="btnDebugSdk">Debug: Find SDK global name</button>
   <button id="btnSend" disabled>3. Build & Send Allowance Approval</button>
 </div>
 
@@ -55,7 +56,19 @@ window.addEventListener('load', () => {
   log('Page origin:', window.location.origin);
 });
 
-document.getElementById('btnCheck').addEventListener('click', () => {
+document.getElementById('btnDebugSdk').addEventListener('click', () => {
+  const matches = Object.keys(window).filter(k => /hedera|hashgraph|sdk/i.test(k));
+  log('Matching window globals:', matches.length ? matches : '(none found)');
+  matches.forEach(k => {
+    try {
+      const val = window[k];
+      const innerKeys = val && typeof val === 'object' ? Object.keys(val).slice(0, 20) : typeof val;
+      log(`window.${k} ->`, innerKeys);
+    } catch (e) {
+      log(`window.${k} -> (error reading: ${e.message})`);
+    }
+  });
+});
   if (typeof window.saucerswapWallet === 'undefined') {
     log('NOT FOUND: window.saucerswapWallet is not injected on this page.');
     log('This means the bridge is likely scoped to specific domains only.');
