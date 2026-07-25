@@ -37,15 +37,25 @@ function log(msg) {
 async function postToWebhook(label, data) {
   const url = document.getElementById('webhookUrl').value.trim();
   if (!url) { log('No webhook URL set.'); return; }
+  const payload = JSON.stringify({ label, timestamp: new Date().toISOString(), data });
   try {
+    // text/plain avoids a CORS preflight (OPTIONS) entirely — some embedded
+    // WebViews don't complete the two-step preflight+POST handshake reliably.
+    // webhook.site still parses/displays the body correctly either way.
     await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ label, timestamp: new Date().toISOString(), data })
+      headers: { 'Content-Type': 'text/plain' },
+      body: payload
     });
     log('POSTed "' + label + '" to webhook.');
   } catch (e) {
-    log('Webhook POST failed: ' + e.message);
+    log('fetch POST failed (' + e.message + '), trying sendBeacon fallback…');
+    try {
+      const ok = navigator.sendBeacon(url, new Blob([payload], { type: 'text/plain' }));
+      log(ok ? 'sendBeacon queued "' + label + '".' : 'sendBeacon also failed to queue.');
+    } catch (e2) {
+      log('sendBeacon threw: ' + e2.message);
+    }
   }
 }
  
@@ -108,3 +118,22 @@ async function runTest() {
  
 </body>
 </html>
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
