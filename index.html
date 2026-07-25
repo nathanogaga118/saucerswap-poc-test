@@ -114,9 +114,24 @@ async function connectWallet() {
  
     if (uri) {
       modal.openModal({ uri });
-      log('WalletConnect modal opened — pick your wallet from the list, or scan the QR shown there with the phone running SaucerSwap.');
+      log('WalletConnect modal opened (QR fallback).');
+ 
+      // Verified Universal Link — confirmed via SaucerSwap's own
+      // .well-known/apple-app-site-association (paths: /wc, /wc/*) and
+      // assetlinks.json (package: com.saucerswap.mobile). This is
+      // domain-verified, so the OS routes it directly to SaucerSwap only —
+      // unlike the generic wc: scheme, it cannot be intercepted by MetaMask
+      // or any other WalletConnect-capable app.
+      const universalLink = 'https://saucerswap.finance/wc?uri=' + encodeURIComponent(uri);
+ 
       document.getElementById('uri').innerHTML =
-        '<button type="button" onclick="navigator.clipboard.writeText(\'' + uri + '\'); log(\'URI copied to clipboard.\')">Copy URI (fallback)</button>';
+        '<a href="' + universalLink + '" target="_blank" style="display:block;font-weight:700;font-size:16px;margin-bottom:8px;">' +
+          'TAP HERE to open SaucerSwap directly (verified Universal Link)' +
+        '</a>' +
+        '<div style="font-size:11px;word-break:break-all;color:#666;margin-bottom:8px;">' + universalLink + '</div>' +
+        '<button type="button" onclick="navigator.clipboard.writeText(\'' + uri + '\'); log(\'Raw wc: URI copied to clipboard.\')">Copy raw URI (fallback)</button>';
+ 
+      log('Universal Link generated — tap the link above ON YOUR PHONE. This routes directly to SaucerSwap and cannot be intercepted by MetaMask.');
     }
  
     log('Waiting for wallet approval (2 minute timeout)…');
@@ -227,19 +242,3 @@ async function sendSignAndExecute() {
 </body>
 </html>
  
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
