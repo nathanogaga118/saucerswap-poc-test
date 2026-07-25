@@ -31,7 +31,7 @@ before signing a request from an already-paired external dApp.</p>
 <button onclick="initWc()">1. Initialize</button>
 <button onclick="pair()">2. Pair with wallet</button>
 <div id="uri"></div>
-<canvas id="qr"></canvas>
+<img id="qr" style="display:block; margin-top:8px;">
 
 <hr>
 
@@ -45,7 +45,6 @@ before signing a request from an already-paired external dApp.</p>
 
 <pre id="log"></pre>
 
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <script>
 function log(msg) {
   const el = document.getElementById('log');
@@ -117,7 +116,8 @@ async function pair() {
         '<a href="' + uri + '" target="_blank">Open in wallet (deep link — only works if tapped ON the phone with SaucerSwap installed)</a><br>' +
         '<button type="button" onclick="navigator.clipboard.writeText(\'' + uri + '\'); log(\'URI copied to clipboard.\')">Copy URI</button>';
       try {
-        QRCode.toCanvas(document.getElementById('qr'), uri, { width: 260 });
+        document.getElementById('qr').src =
+          'https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=' + encodeURIComponent(uri);
         log('QR code rendered — scan with the phone running SaucerSwap (Camera or in-app scanner), do NOT rely on the deep link if you generated this on a different device than your phone.');
       } catch (qrErr) {
         log('QR render failed: ' + qrErr.message + ' (use the deep link or copy the URI manually instead)');
