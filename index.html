@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>WalletConnect Metadata / Verify-API Test (Authorized Security Test)</title>
+<title>In-App Browser Bridge Direct Call Test (Authorized Security Test)</title>
 <style>
   body { font-family: -apple-system, Roboto, sans-serif; background:#111; color:#eee; padding:16px; line-height:1.4; }
   h1 { font-size:18px; }
@@ -12,72 +12,40 @@
   button:active { background:#1e4fae; }
   button.danger { background:#c33; }
   button:disabled { background:#333; color:#888; }
-  pre { background:#000; color:#0f0; padding:10px; border-radius:6px; white-space:pre-wrap; word-break:break-all; font-size:12px; max-height:280px; overflow:auto; }
+  pre { background:#000; color:#0f0; padding:10px; border-radius:6px; white-space:pre-wrap; word-break:break-all; font-size:12px; max-height:340px; overflow:auto; }
   .warn { color:#f66; font-size:12px; }
   .ok { color:#6f6; }
   .bad { color:#f66; }
   .info { color:#9cf; }
-  .note { color:#fc6; font-size:12px; }
-  label { font-size:13px; color:#ccc; }
-  input[type=text] { width:100%; padding:10px; margin:6px 0 12px; box-sizing:border-box; background:#222; color:#eee; border:1px solid #444; border-radius:6px; }
-  #qr { background:#fff; padding:16px; border-radius:8px; display:flex; justify-content:center; margin:12px 0; min-height:220px; align-items:center; }
-  #qr img, #qr canvas { max-width:100%; }
 </style>
 </head>
 <body>
 
-<h1>WalletConnect Metadata Spoof / Verify-API Test</h1>
+<h1>In-App Browser Bridge Direct Call Test</h1>
 <p class="warn">
-  Authorized security test only. This page starts a real WalletConnect v2 pairing
-  session, but reports its own dApp metadata (name/icon/url) as whatever you set
-  below &mdash; independent of the domain actually hosting this page. Purpose:
-  see whether the wallet's approval screen shows the real connecting origin /
-  a Verify API mismatch warning, or blindly trusts and displays the self-reported
-  metadata. Nothing here signs or moves funds &mdash; it only observes what the
-  wallet displays at the pairing/approval step. Do not approve the session unless
-  you intend to test the approval flow itself.
+  Authorized security test only. Open THIS page directly inside SaucerSwap
+  wallet's built-in dApp browser (navigate to this URL like a normal website,
+  do NOT use Scan QR Code — this tests the injected bridge object, not
+  WalletConnect). This calls window.saucerswapWallet's methods directly and
+  logs timing. You must watch the phone screen — the log can only show when a
+  response comes back, not whether an approval sheet appeared on screen.
 </p>
 
-<h2>1. WalletConnect Project ID</h2>
-<label>Your own WalletConnect Cloud project ID (required by the SDK to open a relay session &mdash; get one free at cloud.walletconnect.com, this does not need to belong to the spoofed brand):</label>
-<input type="text" id="projectId" placeholder="e.g. 3fbb...c2a1" value="" />
-
-<h2>2. Spoofed dApp metadata</h2>
-<label>Name (what the wallet will display):</label>
-<input type="text" id="metaName" value="SaucerSwap" />
-<label>Icon URL (what the wallet will render as the dApp's icon):</label>
-<input type="text" id="metaIcon" value="https://www.saucerswap.finance/icons/icon-128x128.png" />
-<label>Claimed URL (self-reported &mdash; this is the metadata.url field the SDK sends, NOT where this page is actually hosted):</label>
-<input type="text" id="metaUrl" value="https://www.saucerswap.finance" />
-<label>Description:</label>
-<input type="text" id="metaDesc" value="SaucerSwap - The DEX for Hedera" />
-<label>Hedera chain to request (hedera:testnet or hedera:mainnet):</label>
-<input type="text" id="hederaChain" value="hedera:testnet" />
-
-<p class="note">
-  Note the actual page origin this script runs from (shown in "env" log below) will
-  differ from the Claimed URL above &mdash; that mismatch is exactly what the
-  Verify API is supposed to catch and flag to the wallet UI. If it doesn't, that's
-  your finding.
-</p>
-
-<button id="startBtn" onclick="startPairing()">Generate Pairing QR</button>
+<button onclick="probeBridge()">1. Probe bridge objects</button>
+<button onclick="tryConnect()">2. Call saucerswapWallet.connect()</button>
+<button onclick="trySignMessage()">3. Call saucerswapWallet.signMessage()</button>
+<button onclick="trySignTransaction()">4. Call saucerswapWallet.signTransaction() (dummy payload)</button>
 <button class="danger" onclick="clearLog()">Clear Log</button>
-
-<h2>3. QR to scan in SaucerSwap wallet</h2>
-<div id="qr"><span style="color:#999">QR will appear here after you tap Generate</span></div>
 
 <h2>Log</h2>
 <pre id="out"></pre>
 
-<script src="https://unpkg.com/@walletconnect/sign-client@2/dist/index.umd.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 const out = document.getElementById('out');
 
 function fmtTag(label) {
-  if (/SUCCESS|approved|connected/i.test(label)) return 'ok';
-  if (/error|rejected|EXCEPTION|denied/i.test(label)) return 'bad';
+  if (/SUCCESS|resolved/i.test(label)) return 'ok';
+  if (/error|rejected|EXCEPTION|not-present/i.test(label)) return 'bad';
   return 'info';
 }
 
@@ -103,89 +71,52 @@ window.addEventListener('unhandledrejection', (ev) => {
   log('UNHANDLED-PROMISE-REJECTION', String(ev.reason));
 });
 
-let signClient = null;
+function probeBridge() {
+  log('actual-page-origin', window.location.origin);
+  const found = {};
+  ['saucerswapWallet', 'hashpack', 'ReactNativeWebView'].forEach(k => {
+    if (typeof window[k] === 'undefined') { found[k] = 'not-present'; return; }
+    found[k] = Object.getOwnPropertyNames(window[k]);
+  });
+  log('bridge-probe-result', found);
+}
 
-async function startPairing() {
-  const projectId = document.getElementById('projectId').value.trim();
-  if (!projectId) {
-    log('config-error', 'Enter a WalletConnect Cloud project ID first (cloud.walletconnect.com — free, takes a minute).');
+async function timedCall(label, fn) {
+  if (!window.saucerswapWallet) {
+    log('bridge-not-present', 'window.saucerswapWallet is undefined on this page — confirm you opened this URL in the wallet\'s built-in browser, not an external browser or via Scan QR Code');
     return;
   }
-  const meta = {
-    name: document.getElementById('metaName').value.trim(),
-    description: document.getElementById('metaDesc').value.trim(),
-    url: document.getElementById('metaUrl').value.trim(),
-    icons: [document.getElementById('metaIcon').value.trim()]
-  };
-  log('spoofed-metadata', meta);
-  log('actual-page-origin', window.location.origin);
-
-  document.getElementById('startBtn').disabled = true;
+  log('WATCH-YOUR-PHONE-NOW', `About to call ${label} in 2s — observe whether an approval sheet appears`);
+  await new Promise(r => setTimeout(r, 2000));
+  const sentAt = Date.now();
+  log(`${label}-invoked`, 'starting');
   try {
-    log('sign-client-init', 'starting');
-    const SignClientLib = window['@walletconnect/sign-client'] && window['@walletconnect/sign-client'].SignClient;
-    if (!SignClientLib) {
-      throw new Error("UMD global '@walletconnect/sign-client' not found on window — check the <script> tag loaded (network tab) before continuing.");
-    }
-    signClient = await SignClientLib.init({
-      projectId,
-      metadata: meta
-    });
-    log('sign-client-init-SUCCESS', 'ready');
-
-    signClient.on('session_proposal', (ev) => log('session_proposal-event', ev));
-    signClient.on('session_event', (ev) => log('session_event', ev));
-    signClient.on('session_update', (ev) => log('session_update', ev));
-    signClient.on('session_delete', (ev) => log('session_delete', ev));
-
-    const hederaChain = document.getElementById('hederaChain').value.trim() || 'hedera:testnet';
-    log('connect-invoked', `requesting pairing URI using Hedera namespace (${hederaChain})`);
-    const { uri, approval } = await signClient.connect({
-      requiredNamespaces: {
-        hedera: {
-          methods: [
-            'hedera_signAndExecuteTransaction',
-            'hedera_executeTransaction',
-            'hedera_signAndExecuteQuery',
-            'hedera_signTransaction',
-            'hedera_signMessage',
-            'hedera_getNodeAddresses'
-          ],
-          chains: [hederaChain],
-          events: ['chainChanged', 'accountsChanged']
-        }
-      }
-    });
-
-    if (uri) {
-      log('pairing-uri-generated', uri);
-      const qrDiv = document.getElementById('qr');
-      qrDiv.innerHTML = '';
-      new QRCode(qrDiv, { text: uri, width: 240, height: 240 });
-      log('instruction', 'Scan this QR in SaucerSwap wallet: Connected Apps > Scan QR Code. Observe the approval screen BEFORE tapping approve — does it show the real origin, a verify warning, or just the spoofed name/icon?');
-    }
-
-    approval().then((session) => {
-      log('session-APPROVED', session);
-    }).catch((e) => {
-      log('session-rejected-or-error', String(e));
-    });
-
+    const result = await fn();
+    const elapsedMs = Date.now() - sentAt;
+    log(`${label}-SUCCESS`, { elapsedMs, note: elapsedMs < 1200 ? 'FAST — under 1.2s, check whether you actually saw/tapped an approval sheet or it resolved on its own' : 'slow enough a manual tap is plausible', result });
   } catch (e) {
-    log('pairing-EXCEPTION', String(e));
-  } finally {
-    document.getElementById('startBtn').disabled = false;
+    const elapsedMs = Date.now() - sentAt;
+    log(`${label}-error-or-rejected`, { elapsedMs, error: String(e) });
   }
 }
 
+function tryConnect() {
+  timedCall('connect', () => window.saucerswapWallet.connect());
+}
+
+function trySignMessage() {
+  timedCall('signMessage', () => window.saucerswapWallet.signMessage('Auto-confirm domain-scoping test message from ' + window.location.origin));
+}
+
+function trySignTransaction() {
+  // Dummy/placeholder payload — real shape unknown from outside; goal is to see
+  // HOW the bridge responds (rejects with a shape error vs. shows a UI vs. hangs),
+  // not to successfully sign anything.
+  timedCall('signTransaction', () => window.saucerswapWallet.signTransaction({ test: true, note: 'placeholder payload, not a real transaction', origin: window.location.origin }));
+}
+
 window.addEventListener('load', () => {
-  log('env', {
-    origin: window.location.origin,
-    ua: navigator.userAgent
-  });
-  const wcGlobals = Object.getOwnPropertyNames(window).filter(k => /walletconnect|signclient/i.test(k));
-  log('walletconnect-globals-found', wcGlobals.length ? wcGlobals : 'NONE — script tag may have failed to load, check network tab');
-  log('ready', 'Fill in project ID + spoofed metadata, then tap Generate Pairing QR.');
+  log('ready', 'Confirm this is loaded in the wallet\'s built-in browser (not external browser, not via QR scan), then tap Probe bridge objects first.');
 });
 </script>
 
