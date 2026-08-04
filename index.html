@@ -121,7 +121,11 @@ async function startPairing() {
   document.getElementById('startBtn').disabled = true;
   try {
     log('sign-client-init', 'starting');
-    signClient = await window.SignClient.init({
+    const SignClientLib = window['@walletconnect/sign-client'] && window['@walletconnect/sign-client'].SignClient;
+    if (!SignClientLib) {
+      throw new Error("UMD global '@walletconnect/sign-client' not found on window — check the <script> tag loaded (network tab) before continuing.");
+    }
+    signClient = await SignClientLib.init({
       projectId,
       metadata: meta
     });
@@ -169,6 +173,8 @@ window.addEventListener('load', () => {
     origin: window.location.origin,
     ua: navigator.userAgent
   });
+  const wcGlobals = Object.getOwnPropertyNames(window).filter(k => /walletconnect|signclient/i.test(k));
+  log('walletconnect-globals-found', wcGlobals.length ? wcGlobals : 'NONE — script tag may have failed to load, check network tab');
   log('ready', 'Fill in project ID + spoofed metadata, then tap Generate Pairing QR.');
 });
 </script>
