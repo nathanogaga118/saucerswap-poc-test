@@ -17,6 +17,7 @@
   .ok { color:#6f6; }
   .bad { color:#f66; }
   .info { color:#9cf; }
+  .note { color:#fc6; font-size:12px; }
   input[type=text] { width:100%; padding:10px; margin:6px 0; box-sizing:border-box; background:#222; color:#eee; border:1px solid #444; border-radius:6px; }
   .row { display:flex; gap:8px; }
   .row button { flex:1; }
@@ -45,11 +46,9 @@
 <div class="row">
   <button onclick="tryAsyncClipboard()">navigator.clipboard.readText()</button>
 </div>
+<p class="note">execCommand('paste') button removed &mdash; Chromium disables interactive execCommand paste unconditionally since ~M89, so this vector returns false/no-event in every modern WebView regardless of host app. It was testing the browser engine, not SaucerSwap. Kept the log line format for reference if you re-add it against an older engine.</p>
 <div class="row">
-  <button onclick="tryExecCommandPaste()">document.execCommand('paste')</button>
-</div>
-<div class="row">
-  <button onclick="tryPasteEventListener()">Focus input + wait for paste event</button>
+  <button onclick="armPassiveListener()">Arm passive paste listener (then manually paste the marker)</button>
 </div>
 <div class="row">
   <button onclick="tryClipboardPermissionsQuery()">navigator.permissions.query(clipboard-read)</button>
@@ -59,7 +58,7 @@
 <button class="danger" onclick="clearLog()">Clear Results</button>
 
 <h2>4. Passive listener (auto-fires, no button)</h2>
-<p>A hidden focused contenteditable that logs any paste event that reaches it without user action.</p>
+<p>A hidden focused contenteditable that logs any paste event that reaches it. <b>This only fires on a real paste gesture</b> &mdash; it cannot self-trigger. Tap "Arm passive paste listener" above, then long-press &rarr; Paste (or Ctrl+V) anywhere on screen within 10s. If content shows up in the log without you explicitly pasting into a visible field, that's the finding.</p>
 <div id="pasteTarget" contenteditable="true" style="position:absolute; left:-9999px; width:1px; height:1px;"></div>
 
 <h2>Results</h2>
@@ -70,7 +69,7 @@ const out = document.getElementById('out');
 
 function fmtTag(label) {
   if (/SUCCESS|fired|granted/i.test(label)) return 'ok';
-  if (/blocked|error|denied|threw|not present/i.test(label)) return 'bad';
+  if (/blocked|error|denied|threw|not present|timeout/i.test(label)) return 'bad';
   return 'info';
 }
 
@@ -105,7 +104,6 @@ function maybeExfiltrate(label, data) {
   }
 }
 
-// --- Global error trapping so silent failures always show up ---
 window.addEventListener('error', (ev) => {
   log('UNCAUGHT-ERROR', `${ev.message} @ ${ev.filename}:${ev.lineno}:${ev.colno}`);
 });
@@ -137,6 +135,9 @@ function probeBridge() {
 }
 
 // --- 3a. Standard async Clipboard API ---
+// FIX: must be called with fresh user-activation, i.e. as the very first
+// awaited thing in a click handler, with no prior await/setTimeout consuming
+// the activation window. Calling this button directly already satisfies that.
 async function tryAsyncClipboard() {
   log('async-clipboard-invoked', 'starting');
   if (!navigator.clipboard || !navigator.clipboard.readText) {
@@ -151,56 +152,29 @@ async function tryAsyncClipboard() {
   }
 }
 
-// --- 3b. Legacy execCommand paste ---
-function tryExecCommandPaste() {
-  log('execCommand-paste-invoked', 'starting');
-  try {
-    const target = document.getElementById('pasteTarget');
-    target.focus();
-    target.textContent = '';
-    let captured = null;
-    const handler = (ev) => {
-      try {
-        captured = (ev.clipboardData || window.clipboardData).getData('text');
-      } catch (e) {
-        captured = 'paste event fired but getData failed: ' + e;
-      }
-    };
-    target.addEventListener('paste', handler, { once: true });
+// --- 3b. Passive listener, now with explicit arm + timeout so a "no result"
+// outcome is logged instead of just silently doing nothing. ---
+let passiveTimer = null;
 
-    let result;
-    try {
-      result = document.execCommand('paste');
-    } catch (e) {
-      result = 'threw: ' + e;
-    }
-
-    setTimeout(() => {
-      log('execCommand-paste-return-value', result);
-      const finalText = captured !== null ? captured : (target.textContent || '(empty / no paste event fired)');
-      log(captured !== null ? 'execCommand-paste-SUCCESS' : 'execCommand-paste-blocked', finalText);
-    }, 250);
-  } catch (e) {
-    log('execCommand-paste-EXCEPTION', String(e));
-  }
+function armPassiveListener() {
+  const target = document.getElementById('pasteTarget');
+  target.textContent = '';
+  target.focus();
+  log('paste-listener-armed', 'Focused hidden field. Manually paste (long-press > Paste, or Ctrl+V) anywhere within 10s.');
+  if (passiveTimer) clearTimeout(passiveTimer);
+  passiveTimer = setTimeout(() => {
+    log('paste-listener-timeout', 'No paste event received in 10s window (expected unless you performed a manual paste)');
+  }, 10000);
 }
 
-// --- 3c. Passive: focus a field and just wait, log any paste that arrives ---
-function tryPasteEventListener() {
-  log('paste-listener-armed', 'Focused hidden field. If the host auto-delivers clipboard content without any explicit read call, it will log below within a few seconds.');
-  try {
-    document.getElementById('pasteTarget').focus();
-  } catch (e) {
-    log('paste-listener-EXCEPTION', String(e));
-  }
-}
 document.getElementById('pasteTarget').addEventListener('paste', (ev) => {
+  if (passiveTimer) { clearTimeout(passiveTimer); passiveTimer = null; }
   let text = '(unavailable)';
   try { text = (ev.clipboardData || window.clipboardData).getData('text'); } catch (e) {}
   log('PASSIVE-paste-event-fired-SUCCESS', text);
 });
 
-// --- 3d. Permissions API introspection ---
+// --- 3c. Permissions API introspection ---
 async function tryClipboardPermissionsQuery() {
   log('permissions-query-invoked', 'starting');
   if (!navigator.permissions || !navigator.permissions.query) {
@@ -216,22 +190,21 @@ async function tryClipboardPermissionsQuery() {
   }
 }
 
-// --- Run everything in order with small gaps so results are easy to read ---
+// --- Run everything in order. FIX: async clipboard read now goes FIRST,
+// synchronously off the click with no preceding await, so it still carries
+// the click's transient user-activation. Everything after it can have gaps
+// since only the clipboard-read call needs fresh activation. ---
 async function runAll() {
   log('run-all-started', '---');
+  await tryAsyncClipboard();
   probeBridge();
   await new Promise(r => setTimeout(r, 400));
-  await tryAsyncClipboard();
-  await new Promise(r => setTimeout(r, 400));
-  tryExecCommandPaste();
-  await new Promise(r => setTimeout(r, 600));
-  tryPasteEventListener();
-  await new Promise(r => setTimeout(r, 400));
   await tryClipboardPermissionsQuery();
-  log('run-all-finished', '---');
+  await new Promise(r => setTimeout(r, 400));
+  armPassiveListener();
+  log('run-all-note', 'Passive listener armed for 10s — manually paste now if testing that vector.');
 }
 
-// Log basic environment info on load
 window.addEventListener('load', () => {
   log('env', {
     ua: navigator.userAgent,
@@ -239,7 +212,7 @@ window.addEventListener('load', () => {
     hasClipboardObj: !!navigator.clipboard,
     hasExecCommand: !!document.execCommand
   });
-  log('ready', 'Tap "Run All Tests In Sequence", or run buttons individually.');
+  log('ready', 'Tap buttons individually for clean activation, or Run All (clipboard read still fires first/fresh).');
 });
 </script>
 
