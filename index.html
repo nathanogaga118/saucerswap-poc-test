@@ -51,6 +51,8 @@
 <input type="text" id="metaUrl" value="https://www.saucerswap.finance" />
 <label>Description:</label>
 <input type="text" id="metaDesc" value="SaucerSwap - The DEX for Hedera" />
+<label>Hedera chain to request (hedera:testnet or hedera:mainnet):</label>
+<input type="text" id="hederaChain" value="hedera:testnet" />
 
 <p class="note">
   Note the actual page origin this script runs from (shown in "env" log below) will
@@ -136,12 +138,20 @@ async function startPairing() {
     signClient.on('session_update', (ev) => log('session_update', ev));
     signClient.on('session_delete', (ev) => log('session_delete', ev));
 
-    log('connect-invoked', 'requesting pairing URI (Hedera-relevant namespace requested generically; adjust chains if your target expects a specific one)');
+    const hederaChain = document.getElementById('hederaChain').value.trim() || 'hedera:testnet';
+    log('connect-invoked', `requesting pairing URI using Hedera namespace (${hederaChain})`);
     const { uri, approval } = await signClient.connect({
       requiredNamespaces: {
-        eip155: {
-          methods: ['eth_sendTransaction', 'personal_sign', 'eth_signTypedData'],
-          chains: ['eip155:1'],
+        hedera: {
+          methods: [
+            'hedera_signAndExecuteTransaction',
+            'hedera_executeTransaction',
+            'hedera_signAndExecuteQuery',
+            'hedera_signTransaction',
+            'hedera_signMessage',
+            'hedera_getNodeAddresses'
+          ],
+          chains: [hederaChain],
           events: ['chainChanged', 'accountsChanged']
         }
       }
