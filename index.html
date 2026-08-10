@@ -1,123 +1,235 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>In-App Browser Bridge Direct Call Test (Authorized Security Test)</title>
+<meta charset="UTF-8">
+<title>Recipient Address QR Scanner - Validation Test Cases</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
-  body { font-family: -apple-system, Roboto, sans-serif; background:#111; color:#eee; padding:16px; line-height:1.4; }
-  h1 { font-size:18px; }
-  h2 { font-size:14px; color:#9cf; margin-top:24px; }
-  button { display:block; width:100%; padding:14px; margin:8px 0; font-size:15px; border:0; border-radius:8px; background:#2d6cdf; color:#fff; }
-  button:active { background:#1e4fae; }
-  button.danger { background:#c33; }
-  button:disabled { background:#333; color:#888; }
-  pre { background:#000; color:#0f0; padding:10px; border-radius:6px; white-space:pre-wrap; word-break:break-all; font-size:12px; max-height:340px; overflow:auto; }
-  .warn { color:#f66; font-size:12px; }
-  .ok { color:#6f6; }
-  .bad { color:#f66; }
-  .info { color:#9cf; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0b0f0d;
+    color: #e6e6e6;
+    margin: 0;
+    padding: 24px;
+  }
+  h1 {
+    font-size: 20px;
+    margin-bottom: 4px;
+  }
+  p.subtitle {
+    color: #9aa39a;
+    margin-top: 0;
+    margin-bottom: 24px;
+    font-size: 14px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 20px;
+  }
+  .card {
+    background: #151b17;
+    border: 1px solid #2a332c;
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .card h3 {
+    margin: 0 0 4px 0;
+    font-size: 15px;
+    color: #ffffff;
+  }
+  .card .tag {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin-bottom: 10px;
+    font-weight: 600;
+  }
+  .tag.control { background: #1f3d2b; color: #6fcf97; }
+  .tag.length { background: #3d2e1f; color: #f2c94c; }
+  .tag.charset { background: #3d1f1f; color: #eb5757; }
+  .tag.checksum { background: #1f2e3d; color: #56ccf2; }
+  .tag.native { background: #2e1f3d; color: #bb6bd9; }
+  .qr-wrap {
+    background: #fff;
+    padding: 10px;
+    border-radius: 8px;
+    display: flex;
+    justify-content: center;
+    margin-bottom: 10px;
+  }
+  .addr {
+    font-family: "SF Mono", Consolas, monospace;
+    font-size: 11px;
+    word-break: break-all;
+    color: #9aa39a;
+    margin-bottom: 6px;
+  }
+  .note {
+    font-size: 12px;
+    color: #7d857e;
+    line-height: 1.4;
+  }
+  .result {
+    margin-top: 10px;
+    display: flex;
+    gap: 6px;
+  }
+  .result button {
+    flex: 1;
+    font-size: 11px;
+    padding: 6px 4px;
+    border-radius: 6px;
+    border: 1px solid #2a332c;
+    background: #1b221d;
+    color: #cfd6cf;
+    cursor: pointer;
+  }
+  .result button.accepted.active { background: #eb5757; color: #fff; border-color: #eb5757; }
+  .result button.rejected.active { background: #6fcf97; color: #0b0f0d; border-color: #6fcf97; }
+  #summary {
+    margin-top: 32px;
+    padding: 16px;
+    background: #151b17;
+    border-radius: 12px;
+    border: 1px solid #2a332c;
+    font-size: 13px;
+    white-space: pre-wrap;
+    font-family: "SF Mono", Consolas, monospace;
+  }
 </style>
 </head>
 <body>
 
-<h1>In-App Browser Bridge Direct Call Test</h1>
-<p class="warn">
-  Authorized security test only. Open THIS page directly inside SaucerSwap
-  wallet's built-in dApp browser (navigate to this URL like a normal website,
-  do NOT use Scan QR Code — this tests the injected bridge object, not
-  WalletConnect). This calls window.saucerswapWallet's methods directly and
-  logs timing. You must watch the phone screen — the log can only show when a
-  response comes back, not whether an approval sheet appeared on screen.
-</p>
+<h1>Recipient QR Scan — Address Validation Test Set</h1>
+<p class="subtitle">Scan each code via the wallet's "Scan Address QR Code" screen. Record whether the app shows "Invalid Address" (disabled Continue) or accepts it and proceeds. Regex under test: <code>/^(0\.0\.\d+|0x[a-fA-F0-9]{40})$/</code></p>
 
-<button onclick="probeBridge()">1. Probe bridge objects</button>
-<button onclick="tryConnect()">2. Call saucerswapWallet.connect()</button>
-<button onclick="trySignMessage()">3. Call saucerswapWallet.signMessage()</button>
-<button onclick="trySignTransaction()">4. Call saucerswapWallet.signTransaction() (dummy payload)</button>
-<button class="danger" onclick="clearLog()">Clear Log</button>
+<div class="grid" id="grid"></div>
 
-<h2>Log</h2>
-<pre id="out"></pre>
+<div id="summary">Results log:\n(click accepted/rejected under each card as you test)</div>
 
 <script>
-const out = document.getElementById('out');
+const cases = [
+  {
+    id: "control-valid-evm",
+    label: "Control: Valid EVM address",
+    tag: "control",
+    value: "0x000000000000000000000000000000009b7d48",
+    note: "40 hex chars, well-formed. Should PASS regex and be accepted. Baseline sanity check."
+  },
+  {
+    id: "control-valid-hedera",
+    label: "Control: Valid Hedera native ID",
+    tag: "control",
+    value: "0.0.10190152",
+    note: "Matches 0.0.\\d+ branch. Should PASS regex and be accepted."
+  },
+  {
+    id: "short-39",
+    label: "Too short (39 hex chars)",
+    tag: "length",
+    value: "0x00000000000000000000000000000000009b7d4",
+    note: "One char short of 40. Should FAIL regex if length is properly enforced."
+  },
+  {
+    id: "long-41",
+    label: "Too long (41 hex chars)",
+    tag: "length",
+    value: "0x000000000000000000000000000000009b7d480",
+    note: "One char over 40. Should FAIL regex if length is properly enforced."
+  },
+  {
+    id: "non-hex",
+    label: "Non-hex characters injected",
+    tag: "charset",
+    value: "0x00000000000000000000000000000000ZZ7d48",
+    note: "Contains non-hex chars (Z) in place of hex digits, same length. Should FAIL regex."
+  },
+  {
+    id: "whitespace-trailing",
+    label: "Valid address + trailing whitespace",
+    tag: "charset",
+    value: "0x000000000000000000000000000000009b7d48 ",
+    note: "Tests whether scanner trims input before regex test, or whether raw QR payload (with whitespace/newline) breaks the anchored match."
+  },
+  {
+    id: "checksum-mismatch",
+    label: "Checksum-mismatched casing",
+    tag: "checksum",
+    value: "0x000000000000000000000000000000009B7D48",
+    note: "Correct length/hex charset, but casing does not match EIP-55 checksum. Regex has no checksum logic, so this is expected to PASS -- documents the known gap, not a new bug."
+  },
+  {
+    id: "hedera-malformed",
+    label: "Malformed Hedera-native ID",
+    tag: "native",
+    value: "0.0.abc123",
+    note: "Non-numeric shard/realm/num segment. Should FAIL regex (native branch requires \\d+)."
+  },
+  {
+    id: "hedera-negative",
+    label: "Hedera ID with symbols",
+    tag: "native",
+    value: "0.0.-10190152",
+    note: "Negative sign injected into numeric segment. Should FAIL regex."
+  },
+  {
+    id: "embedded-newline",
+    label: "Payload with embedded newline / extra data",
+    tag: "charset",
+    value: "0x000000000000000000000000000000009b7d48\nDROP TABLE",
+    note: "Tests whether QR payload is treated as a single opaque string passed to regex.test(), or parsed/split in a way that could desync validation from what gets stored in state."
+  }
+];
 
-function fmtTag(label) {
-  if (/SUCCESS|resolved/i.test(label)) return 'ok';
-  if (/error|rejected|EXCEPTION|not-present/i.test(label)) return 'bad';
-  return 'info';
-}
+const grid = document.getElementById("grid");
+const results = {};
 
-function log(label, data) {
-  const time = new Date().toISOString();
-  const text = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-  const div = document.createElement('div');
-  div.className = fmtTag(label);
-  div.textContent = `[${time}] ${label}: ${text}`;
-  out.appendChild(div);
-  out.scrollTop = out.scrollHeight;
-}
+cases.forEach(c => {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `
+    <span class="tag ${c.tag}">${c.tag.toUpperCase()}</span>
+    <h3>${c.label}</h3>
+    <div class="qr-wrap" id="qr-${c.id}"></div>
+    <div class="addr">${c.value.replace(/\n/g, "\\n")}</div>
+    <div class="note">${c.note}</div>
+    <div class="result">
+      <button class="accepted" data-id="${c.id}" data-outcome="accepted">Wallet ACCEPTED it</button>
+      <button class="rejected" data-id="${c.id}" data-outcome="rejected">Wallet REJECTED it</button>
+    </div>
+  `;
+  grid.appendChild(card);
 
-function clearLog() {
-  out.textContent = '';
-  log('log-cleared', 'ready');
-}
-
-window.addEventListener('error', (ev) => {
-  log('UNCAUGHT-ERROR', `${ev.message} @ ${ev.filename}:${ev.lineno}:${ev.colno}`);
-});
-window.addEventListener('unhandledrejection', (ev) => {
-  log('UNHANDLED-PROMISE-REJECTION', String(ev.reason));
-});
-
-function probeBridge() {
-  log('actual-page-origin', window.location.origin);
-  const found = {};
-  ['saucerswapWallet', 'hashpack', 'ReactNativeWebView'].forEach(k => {
-    if (typeof window[k] === 'undefined') { found[k] = 'not-present'; return; }
-    found[k] = Object.getOwnPropertyNames(window[k]);
+  new QRCode(document.getElementById(`qr-${c.id}`), {
+    text: c.value,
+    width: 200,
+    height: 200,
+    colorDark: "#000000",
+    colorLight: "#ffffff"
   });
-  log('bridge-probe-result', found);
-}
-
-async function timedCall(label, fn) {
-  if (!window.saucerswapWallet) {
-    log('bridge-not-present', 'window.saucerswapWallet is undefined on this page — confirm you opened this URL in the wallet\'s built-in browser, not an external browser or via Scan QR Code');
-    return;
-  }
-  log('WATCH-YOUR-PHONE-NOW', `About to call ${label} in 2s — observe whether an approval sheet appears`);
-  await new Promise(r => setTimeout(r, 2000));
-  const sentAt = Date.now();
-  log(`${label}-invoked`, 'starting');
-  try {
-    const result = await fn();
-    const elapsedMs = Date.now() - sentAt;
-    log(`${label}-SUCCESS`, { elapsedMs, note: elapsedMs < 1200 ? 'FAST — under 1.2s, check whether you actually saw/tapped an approval sheet or it resolved on its own' : 'slow enough a manual tap is plausible', result });
-  } catch (e) {
-    const elapsedMs = Date.now() - sentAt;
-    log(`${label}-error-or-rejected`, { elapsedMs, error: String(e) });
-  }
-}
-
-function tryConnect() {
-  timedCall('connect', () => window.saucerswapWallet.connect());
-}
-
-function trySignMessage() {
-  timedCall('signMessage', () => window.saucerswapWallet.signMessage('Auto-confirm domain-scoping test message from ' + window.location.origin));
-}
-
-function trySignTransaction() {
-  // Dummy/placeholder payload — real shape unknown from outside; goal is to see
-  // HOW the bridge responds (rejects with a shape error vs. shows a UI vs. hangs),
-  // not to successfully sign anything.
-  timedCall('signTransaction', () => window.saucerswapWallet.signTransaction({ test: true, note: 'placeholder payload, not a real transaction', origin: window.location.origin }));
-}
-
-window.addEventListener('load', () => {
-  log('ready', 'Confirm this is loaded in the wallet\'s built-in browser (not external browser, not via QR scan), then tap Probe bridge objects first.');
 });
+
+document.addEventListener("click", (e) => {
+  if (e.target.tagName !== "BUTTON") return;
+  const id = e.target.dataset.id;
+  const outcome = e.target.dataset.outcome;
+  results[id] = outcome;
+
+  document.querySelectorAll(`button[data-id="${id}"]`).forEach(b => b.classList.remove("active"));
+  e.target.classList.add("active");
+
+  updateSummary();
+});
+
+function updateSummary() {
+  const lines = cases.map(c => {
+    const r = results[c.id] || "not tested";
+    return `${c.id.padEnd(24)} -> ${r}`;
+  });
+  document.getElementById("summary").textContent = "Results log:\n" + lines.join("\n");
+}
 </script>
 
 </body>
