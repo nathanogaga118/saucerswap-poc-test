@@ -2,98 +2,123 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>wc-uri-poc</title>
+<title>PoC: wcPollInterval unbounded timer leak</title>
 <style>
-  body { font-family: -apple-system, monospace; background:#111; color:#eee; padding:16px; }
-  button { display:block; width:100%; padding:14px; margin:8px 0; font-size:14px; background:#222; color:#0f0; border:1px solid #444; }
-  #log { white-space:pre-wrap; font-size:11px; background:#000; padding:10px; border:1px solid #333; min-height:120px; margin-top:12px; word-break:break-all; }
-  .uri { color:#0af; }
+  body { font-family: monospace; background:#111; color:#0f0; padding:20px; }
+  #log { white-space: pre-wrap; background:#000; padding:10px; min-height:200px; border:1px solid #333; }
+  button { margin:4px 4px 12px 0; padding:8px 14px; }
+  .bad { color:#f55; }
+  .ok { color:#5f5; }
+  h2 { color:#eee; }
+  p { color:#aaa; max-width:800px; }
+  code { color:#9cf; }
 </style>
 </head>
 <body>
-<h3>wc: URI harvester test</h3>
-<div id="log">waiting...\n</div>
-
-<button onclick="run('setattr')">1. setAttribute vector</button>
-<button onclick="run('poller')">2. DOM poller vector (qrcode tag)</button>
-<button onclick="run('open')">3. window.open vector</button>
-<button onclick="run('clip')">4. clipboard.writeText vector</button>
-<button onclick="run('anchor')">5. anchor click vector</button>
+<h2>PoC: <code>wcPollInterval</code> has no teardown path except "found a match"</h2>
+<p>
+  Source: <code>injectedJavaScript</code> payload from the SaucerSwap Android bundle's
+  dApp browser overlay (WalletConnect URI polling block, extracted verbatim below).
+  This page instruments <code>setInterval</code>/<code>clearInterval</code>, runs the
+  real payload, and simulates repeated re-injection (as would happen on
+  <code>onNavigationStateChange</code> / an <code>injectJavaScript()</code> ref call)
+  to show timers stack instead of being replaced.
+</p>
+<button onclick="simulateNavigation()">Simulate 1 navigation (re-inject)</button>
+<button onclick="simulateNavigations(15)">Simulate 15 navigations</button>
+<button onclick="clearLog()">Clear log</button>
+<div id="log"></div>
 
 <script>
-var logEl = document.getElementById('log');
-function log(m) {
-  logEl.textContent += m + '\n';
+const logEl = document.getElementById('log');
+function log(msg, cls) {
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  logEl.appendChild(line);
   logEl.scrollTop = logEl.scrollHeight;
 }
+function clearLog() { logEl.innerHTML = ''; }
 
-log('bridge present: ' + (typeof window.ReactNativeWebView !== 'undefined'));
-log('saucerswapWallet present: ' + (typeof window.saucerswapWallet !== 'undefined'));
+// --- Instrumentation: track every live interval spawned by the injected code ---
+let liveIntervals = new Set();
+let totalCreated = 0;
+const realSetInterval = window.setInterval.bind(window);
+const realClearInterval = window.clearInterval.bind(window);
+window.setInterval = function (fn, ms) {
+  const id = realSetInterval(fn, ms);
+  liveIntervals.add(id);
+  totalCreated++;
+  log(`[instrumentation] setInterval -> id ${id}. Live timers: ${liveIntervals.size}`);
+  return id;
+};
+window.clearInterval = function (id) {
+  liveIntervals.delete(id);
+  log(`[instrumentation] clearInterval(${id}). Live timers: ${liveIntervals.size}`, 'ok');
+  return realClearInterval(id);
+};
 
-// distinct dummy topic per vector so you can match which one fired if
-// native logging / mitmproxy shows the resulting postMessage or relay call
-function fakeUri(tag) {
-  var pad = tag.padEnd(8, '0').slice(0,8);
-  return 'wc:' + pad + 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@2?relay-protocol=irn&symKey=' + '1'.repeat(64);
-}
+// Stub RN bridge so postMessage doesn't error outside the app
+window.ReactNativeWebView = { postMessage: () => {} };
 
-function run(vector) {
-  var uri = fakeUri(vector);
-  log('--- triggering [' + vector + '] ---');
-  log('<span class="uri">' + uri + '</span>');
-
-  try {
-    if (vector === 'setattr') {
-      var el = document.createElement('div');
-      document.body.appendChild(el);
-      el.setAttribute('data-uri', uri);
-      log('setAttribute called on a plain <div>, no walletconnect class/id needed');
+// --- Actual injected payload logic, extracted verbatim from the bundle ---
+function searchForWcUri(node) {
+  if (!node) return null;
+  if (node.tagName) {
+    const tag = node.tagName.toLowerCase();
+    if (tag === 'w3m-qr-code' || tag === 'wcm-qrcode' || tag.includes('qrcode')) {
+      const uri = node.getAttribute('uri') || node.getAttribute('data-uri') || node.uri || node.value;
+      if (uri && typeof uri === 'string' && uri.startsWith('wc:')) return uri;
     }
-
-    else if (vector === 'poller') {
-      // mimic real WC modal shape so the poller's searchForWcUri finds it:
-      // outer container needs class/id matching *walletconnect*, inner
-      // element needs tag containing "qrcode" (or w3m-qr-code/wcm-qrcode)
-      // exposing uri via getAttribute('uri')/('data-uri')/.uri/.value
-      var outer = document.createElement('div');
-      outer.className = 'walletconnect-fake-modal';
-      var inner = document.createElement('div');
-      inner.setAttribute('data-tag', 'fake-qrcode-holder');
-      // fake custom element name containing "qrcode" so tagName check matches
-      var qr = document.createElement('fake-wcm-qrcode');
-      qr.setAttribute('uri', uri);
-      inner.appendChild(qr);
-      outer.appendChild(inner);
-      document.body.appendChild(outer);
-      log('injected fake w3m/wcm-style modal, waiting up to 500ms for poller...');
-    }
-
-    else if (vector === 'open') {
-      var ret = window.open(uri);
-      log('window.open returned: ' + ret);
-    }
-
-    else if (vector === 'clip') {
-      navigator.clipboard.writeText(uri)
-        .then(function(){ log('clipboard.writeText resolved'); })
-        .catch(function(e){ log('clipboard.writeText rejected: ' + e); });
-    }
-
-    else if (vector === 'anchor') {
-      var a = document.createElement('a');
-      a.href = uri;
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      log('synthetic anchor click dispatched');
-    }
-  } catch (e) {
-    log('ERROR: ' + e);
   }
-
-  log('watch native side (mitmproxy / wallet UI) for a pairing prompt or postMessage with this URI');
+  if (node.shadowRoot) {
+    const uri = searchForWcUri(node.shadowRoot);
+    if (uri) return uri;
+  }
+  if (node.childNodes) {
+    for (let i = 0; i < node.childNodes.length; i++) {
+      const uri = searchForWcUri(node.childNodes[i]);
+      if (uri) return uri;
+    }
+  }
+  return null;
 }
+
+function injectPayload(navIndex) {
+  // Exact structure from the bundle: fresh `var wcPollInterval` per injection;
+  // clearInterval only reachable from inside the success branch below.
+  var wcPollInterval = setInterval(function () {
+    const modals = document.querySelectorAll('w3m-modal, wcm-modal, [id*="walletconnect"], [class*="walletconnect"]');
+    for (let i = 0; i < modals.length; i++) {
+      const uri = searchForWcUri(modals[i]);
+      if (uri && uri.startsWith('wc:') && window.lastInterceptedWcUri !== uri) {
+        window.lastInterceptedWcUri = uri;
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'walletconnect_uri', uri: uri }));
+        clearInterval(wcPollInterval); // <-- only exit path; never reached on a page with no WC modal
+      }
+    }
+  }, 500);
+  log(`[nav ${navIndex}] injectedJavaScript executed. No WalletConnect modal present on this page (typical case).`);
+}
+
+function simulateNavigation() {
+  const n = (window.__navCount = (window.__navCount || 0) + 1);
+  injectPayload(n);
+}
+
+function simulateNavigations(count) {
+  for (let i = 1; i <= count; i++) injectPayload(i);
+  log(`\n=== RESULT after ${count} navigations ===`, 'bad');
+  log(`Total intervals created : ${totalCreated}`);
+  log(`Intervals still live    : ${liveIntervals.size}`, liveIntervals.size === totalCreated ? 'bad' : 'ok');
+  log(`Intervals ever cleared  : ${totalCreated - liveIntervals.size}`);
+  log(liveIntervals.size === totalCreated
+    ? 'CONFIRMED: zero intervals torn down. Every injection leaks a permanent 500ms timer.'
+    : 'Some intervals cleared (would only happen if a WC modal was actually matched).', 'bad');
+}
+
+// Auto-run proof on load, headless-friendly (also works via `node index.html`-less: open directly in a browser)
+window.addEventListener('load', () => simulateNavigations(15));
 </script>
 </body>
 </html>
