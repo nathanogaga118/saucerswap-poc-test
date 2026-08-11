@@ -2,234 +2,87 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Recipient Address QR Scanner - Validation Test Cases</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PoC — Parent (Trusted) Page</title>
 <style>
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #0b0f0d;
-    color: #e6e6e6;
-    margin: 0;
-    padding: 24px;
-  }
-  h1 {
-    font-size: 20px;
-    margin-bottom: 4px;
-  }
-  p.subtitle {
-    color: #9aa39a;
-    margin-top: 0;
-    margin-bottom: 24px;
-    font-size: 14px;
-  }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 20px;
-  }
-  .card {
-    background: #151b17;
-    border: 1px solid #2a332c;
-    border-radius: 12px;
-    padding: 16px;
-  }
-  .card h3 {
-    margin: 0 0 4px 0;
-    font-size: 15px;
-    color: #ffffff;
-  }
-  .card .tag {
-    display: inline-block;
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    margin-bottom: 10px;
-    font-weight: 600;
-  }
-  .tag.control { background: #1f3d2b; color: #6fcf97; }
-  .tag.length { background: #3d2e1f; color: #f2c94c; }
-  .tag.charset { background: #3d1f1f; color: #eb5757; }
-  .tag.checksum { background: #1f2e3d; color: #56ccf2; }
-  .tag.native { background: #2e1f3d; color: #bb6bd9; }
-  .qr-wrap {
-    background: #fff;
-    padding: 10px;
-    border-radius: 8px;
-    display: flex;
-    justify-content: center;
-    margin-bottom: 10px;
-  }
-  .addr {
-    font-family: "SF Mono", Consolas, monospace;
-    font-size: 11px;
-    word-break: break-all;
-    color: #9aa39a;
-    margin-bottom: 6px;
-  }
-  .note {
-    font-size: 12px;
-    color: #7d857e;
-    line-height: 1.4;
-  }
-  .result {
-    margin-top: 10px;
-    display: flex;
-    gap: 6px;
-  }
-  .result button {
-    flex: 1;
-    font-size: 11px;
-    padding: 6px 4px;
-    border-radius: 6px;
-    border: 1px solid #2a332c;
-    background: #1b221d;
-    color: #cfd6cf;
-    cursor: pointer;
-  }
-  .result button.accepted.active { background: #eb5757; color: #fff; border-color: #eb5757; }
-  .result button.rejected.active { background: #6fcf97; color: #0b0f0d; border-color: #6fcf97; }
-  #summary {
-    margin-top: 32px;
-    padding: 16px;
-    background: #151b17;
-    border-radius: 12px;
-    border: 1px solid #2a332c;
-    font-size: 13px;
-    white-space: pre-wrap;
-    font-family: "SF Mono", Consolas, monospace;
-  }
+  body { font-family: -apple-system, system-ui, sans-serif; background:#0b0f14; color:#e6edf3; padding:20px; line-height:1.5; }
+  h1 { font-size:18px; }
+  .card { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:16px; margin-bottom:16px; }
+  button, a.btn { display:inline-block; background:#238636; color:white; border:none; padding:10px 16px; border-radius:6px; font-size:14px; text-decoration:none; margin:6px 6px 0 0; cursor:pointer; }
+  a.btn.blank { background:#8957e5; }
+  #log { background:#010409; border:1px solid #30363d; border-radius:6px; padding:10px; font-family:monospace; font-size:12px; white-space:pre-wrap; min-height:80px; }
+  .warn { color:#f0883e; }
 </style>
 </head>
 <body>
 
-<h1>Recipient QR Scan — Address Validation Test Set</h1>
-<p class="subtitle">Scan each code via the wallet's "Scan Address QR Code" screen. Record whether the app shows "Invalid Address" (disabled Continue) or accepts it and proceeds. Regex under test: <code>/^(0\.0\.\d+|0x[a-fA-F0-9]{40})$/</code></p>
+<h1>Step 1 — Parent context (load this in the SaucerSwap in-app browser)</h1>
 
-<div class="grid" id="grid"></div>
+<div class="card">
+  <p>This page simulates the "already-connected legitimate dApp" tab. Load it inside SaucerSwap's in-app
+  browser first — <strong>connect the wallet normally here</strong> so this origin is genuinely trusted,
+  then use the buttons below to spawn a popup.</p>
 
-<div id="summary">Results log:\n(click accepted/rejected under each card as you test)</div>
+  <button onclick="openPopup()">window.open() popup</button>
+  <a class="btn blank" href="popup.html" target="_blank" rel="noopener">target=&quot;_blank&quot; link</a>
+  <button onclick="probeParent()">Probe wallet bridge (parent, for baseline)</button>
+
+  <p class="warn" id="verdict"></p>
+</div>
+
+<div class="card">
+  <div id="log">Waiting...</div>
+</div>
 
 <script>
-const cases = [
-  {
-    id: "control-valid-evm",
-    label: "Control: Valid EVM address",
-    tag: "control",
-    value: "0x000000000000000000000000000000009b7d48",
-    note: "40 hex chars, well-formed. Should PASS regex and be accepted. Baseline sanity check."
-  },
-  {
-    id: "control-valid-hedera",
-    label: "Control: Valid Hedera native ID",
-    tag: "control",
-    value: "0.0.10190152",
-    note: "Matches 0.0.\\d+ branch. Should PASS regex and be accepted."
-  },
-  {
-    id: "short-39",
-    label: "Too short (39 hex chars)",
-    tag: "length",
-    value: "0x00000000000000000000000000000000009b7d4",
-    note: "One char short of 40. Should FAIL regex if length is properly enforced."
-  },
-  {
-    id: "long-41",
-    label: "Too long (41 hex chars)",
-    tag: "length",
-    value: "0x000000000000000000000000000000009b7d480",
-    note: "One char over 40. Should FAIL regex if length is properly enforced."
-  },
-  {
-    id: "non-hex",
-    label: "Non-hex characters injected",
-    tag: "charset",
-    value: "0x00000000000000000000000000000000ZZ7d48",
-    note: "Contains non-hex chars (Z) in place of hex digits, same length. Should FAIL regex."
-  },
-  {
-    id: "whitespace-trailing",
-    label: "Valid address + trailing whitespace",
-    tag: "charset",
-    value: "0x000000000000000000000000000000009b7d48 ",
-    note: "Tests whether scanner trims input before regex test, or whether raw QR payload (with whitespace/newline) breaks the anchored match."
-  },
-  {
-    id: "checksum-mismatch",
-    label: "Checksum-mismatched casing",
-    tag: "checksum",
-    value: "0x000000000000000000000000000000009B7D48",
-    note: "Correct length/hex charset, but casing does not match EIP-55 checksum. Regex has no checksum logic, so this is expected to PASS -- documents the known gap, not a new bug."
-  },
-  {
-    id: "hedera-malformed",
-    label: "Malformed Hedera-native ID",
-    tag: "native",
-    value: "0.0.abc123",
-    note: "Non-numeric shard/realm/num segment. Should FAIL regex (native branch requires \\d+)."
-  },
-  {
-    id: "hedera-negative",
-    label: "Hedera ID with symbols",
-    tag: "native",
-    value: "0.0.-10190152",
-    note: "Negative sign injected into numeric segment. Should FAIL regex."
-  },
-  {
-    id: "embedded-newline",
-    label: "Payload with embedded newline / extra data",
-    tag: "charset",
-    value: "0x000000000000000000000000000000009b7d48\nDROP TABLE",
-    note: "Tests whether QR payload is treated as a single opaque string passed to regex.test(), or parsed/split in a way that could desync validation from what gets stored in state."
-  }
-];
-
-const grid = document.getElementById("grid");
-const results = {};
-
-cases.forEach(c => {
-  const card = document.createElement("div");
-  card.className = "card";
-  card.innerHTML = `
-    <span class="tag ${c.tag}">${c.tag.toUpperCase()}</span>
-    <h3>${c.label}</h3>
-    <div class="qr-wrap" id="qr-${c.id}"></div>
-    <div class="addr">${c.value.replace(/\n/g, "\\n")}</div>
-    <div class="note">${c.note}</div>
-    <div class="result">
-      <button class="accepted" data-id="${c.id}" data-outcome="accepted">Wallet ACCEPTED it</button>
-      <button class="rejected" data-id="${c.id}" data-outcome="rejected">Wallet REJECTED it</button>
-    </div>
-  `;
-  grid.appendChild(card);
-
-  new QRCode(document.getElementById(`qr-${c.id}`), {
-    text: c.value,
-    width: 200,
-    height: 200,
-    colorDark: "#000000",
-    colorLight: "#ffffff"
-  });
-});
-
-document.addEventListener("click", (e) => {
-  if (e.target.tagName !== "BUTTON") return;
-  const id = e.target.dataset.id;
-  const outcome = e.target.dataset.outcome;
-  results[id] = outcome;
-
-  document.querySelectorAll(`button[data-id="${id}"]`).forEach(b => b.classList.remove("active"));
-  e.target.classList.add("active");
-
-  updateSummary();
-});
-
-function updateSummary() {
-  const lines = cases.map(c => {
-    const r = results[c.id] || "not tested";
-    return `${c.id.padEnd(24)} -> ${r}`;
-  });
-  document.getElementById("summary").textContent = "Results log:\n" + lines.join("\n");
+function log(msg) {
+  const el = document.getElementById('log');
+  const line = `[${new Date().toISOString()}] ${msg}`;
+  el.textContent += (el.textContent === 'Waiting...' ? '' : '\n') + line;
+  console.log(line);
 }
+
+function openPopup() {
+  log('Calling window.open("popup.html", "_blank")...');
+  const w = window.open('popup.html', '_blank');
+  if (!w) {
+    log('window.open() returned null/undefined — likely blocked, no-opped, or redirected to system browser.');
+    document.getElementById('verdict').textContent =
+      'VERDICT: window.open() did not yield a script-accessible window. Check whether a native browser tab opened instead (that alone answers the "does it spawn a child WebView" question) or nothing happened at all.';
+  } else {
+    log('window.open() returned a window reference — a new browsing context was created.');
+  }
+}
+
+// Enumerate whatever injected wallet bridge exists, without assuming a name.
+// SaucerSwap Wallet / HashPack-style injections commonly show up as window.hashconnect,
+// window.hedera, window.saucerswap, window.ethereum-style shims, or a postMessage-based bridge.
+function enumerateBridgeCandidates() {
+  const suspects = [];
+  for (const key of Object.getOwnPropertyNames(window)) {
+    if (/hedera|hashpack|hashconnect|saucer|wallet|dapp|bridge|provider/i.test(key)) {
+      suspects.push(key);
+    }
+  }
+  return suspects;
+}
+
+function probeParent() {
+  const suspects = enumerateBridgeCandidates();
+  log('Injected globals matching wallet/bridge patterns: ' + (suspects.length ? suspects.join(', ') : 'NONE FOUND'));
+  suspects.forEach(key => {
+    try {
+      log(`window.${key} = ` + JSON.stringify(window[key], (k, v) => typeof v === 'function' ? '[function]' : v).slice(0, 400));
+    } catch (e) {
+      log(`window.${key} present but not JSON-serializable (${e.message})`);
+    }
+  });
+}
+
+window.addEventListener('load', () => {
+  log('Parent page loaded at origin: ' + location.origin);
+  probeParent();
+});
 </script>
 
 </body>
