@@ -1,82 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>Hedera Testnet Token Transfer</title>
+
+  <style>
+    :root {
+      --purple: #8259ef;
+      --purple-dark: #6940d9;
+      --dark: #171321;
+      --bg: #f7f6fa;
+      --card: #ffffff;
+      --text: #201c28;
+      --muted: #77717f;
+      --border: #e5e1eb;
+      --success: #16875b;
+      --danger: #c0392b;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family:
+        Inter,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+    }
+
+    header {
+      background: var(--dark);
+      color: white;
+    }
+
+    .header-inner {
+      max-width: 760px;
+      margin: auto;
+      padding: 18px 20px;
+
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+    }
+
+    .logo {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      background: var(--purple);
+
+      display: grid;
+      place-items: center;
+
+      font-weight: 900;
+    }
+
+    .network {
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 20px;
+
+      background: rgba(255,255,255,.1);
+      color: #d9d0ff;
+    }
+
+    main {
+      max-width: 620px;
+      margin: 55px auto;
+      padding: 0 20px;
+    }
+
+    .card {
+      background: var(--card);
+
+      border: 1px solid var(--border);
+      border-radius: 18px;
+
+      padding: 30px;
+
+      box-shadow:
+        0 12px 35px rgba(30, 20, 60, .07);
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: 28px;
+    }
+
+    .description {
+      color: var(--muted);
+      line-height: 1.6;
+      margin-bottom: 28px;
+    }
+
+    .testnet {
+      background: #f1edff;
+      border: 1px solid #ddd3ff;
+
+      border-radius: 12px;
+
+      padding: 13px 15px;
+
+      font-size: 13px;
+      line-height: 1.5;
+
+      margin-bottom: 25px;
+    }
+
+    .details {
+      border: 1px solid var(--border);
+      border-radius: 13px;
+
+      overflow: hidden;
+      margin-bottom: 25px;
+    }
+
+    .row {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+
+      padding: 14px 16px;
+
+      border-bottom: 1px solid var(--border);
+    }
+
+    .row:last-child {
+      border-bottom: 0;
+    }
+
+    .label {
+      color: var(--muted);
+    }
+
+    .value {
+      font-weight: 600;
+      text-align: right;
+      word-break: break-all;
+    }
+
+    button {
+      width: 100%;
+
+      border: 0;
+      border-radius: 12px;
+
+      padding: 15px;
+
+      background: var(--purple);
+      color: white;
+
+      font-size: 16px;
+      font-weight: 700;
+
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: var(--purple-dark);
+    }
+
+    button:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+
+    #status {
+      display: none;
+
+      margin-top: 18px;
+      padding: 14px;
+
+      border-radius: 12px;
+
+      background: #f5f3f8;
+      color: var(--muted);
+
+      font-size: 14px;
+      line-height: 1.5;
+
+      word-break: break-word;
+    }
+
+    #status.visible {
+      display: block;
+    }
+
+    #status.success {
+      color: var(--success);
+      background: #eef9f4;
+    }
+
+    #status.error {
+      color: var(--danger);
+      background: #fdf0ef;
+    }
+
+    .research {
+      margin-top: 25px;
+
+      color: var(--muted);
+
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    footer {
+      text-align: center;
+
+      color: var(--muted);
+
+      font-size: 12px;
+
+      padding: 30px;
+    }
+  </style>
+</head>
+
+<body>
+
+<header>
+
+  <div class="header-inner">
+
+    <div class="brand">
+
+      <div class="logo">
+        H
+      </div>
+
+      Hedera Testnet
+
+    </div>
+
+    <div class="network">
+      TESTNET
+    </div>
+
+  </div>
+
+</header>
+
+
+<main>
+
+  <section class="card">
+
+    <h1>
+      Token Transfer
+    </h1>
+
+    <div class="description">
+      Transfer one unit of the test token to the
+      designated testnet account using your connected
+      wallet.
+    </div>
+
+
+    <div class="testnet">
+
+      This is a controlled Hedera Testnet experiment.
+      No mainnet assets are involved.
+
+    </div>
+
+
+    <div class="details">
+
+      <div class="row">
+
+        <span class="label">
+          Network
+        </span>
+
+        <span class="value">
+          Hedera Testnet
+        </span>
+
+      </div>
+
+
+      <div class="row">
+
+        <span class="label">
+          Token
+        </span>
+
+        <span class="value">
+          0.0.10037892
+        </span>
+
+      </div>
+
+
+      <div class="row">
+
+        <span class="label">
+          Amount
+        </span>
+
+        <span class="value">
+          1
+        </span>
+
+      </div>
+
+
+      <div class="row">
+
+        <span class="label">
+          Recipient
+        </span>
+
+        <span class="value">
+          0.0.10015061
+        </span>
+
+      </div>
+
+    </div>
+
+
+    <button id="sendButton">
+      Send 1 Token
+    </button>
+
+
+    <div id="status"></div>
+
+
+    <div class="research">
+
+      Testnet research interface. Transaction approval
+      and transaction details are handled by the
+      connected wallet.
+
+    </div>
+
+  </section>
+
+</main>
+
+
+<footer>
+
+  Hedera Testnet Research
+
+</footer>
+
+
 <script>
-const sendButton = document.getElementById("sendButton");
-const status = document.getElementById("status");
 
-const TOKEN_ID = "0.0.10037892";
-const RECIPIENT = "0.0.10015061";
+  const sendButton =
+    document.getElementById("sendButton");
 
-function setStatus(message, type = "") {
-  status.textContent = message;
-  status.className = "visible " + type;
-}
+  const status =
+    document.getElementById("status");
 
-function findWalletProvider() {
-  const candidates = [
-    window.ethereum,
-    window.saucer,
-    window.saucerswap,
-    window.wallet
-  ];
 
-  return candidates.find(
-    provider =>
-      provider &&
-      typeof provider.request === "function"
-  );
-}
+  const TOKEN_ID =
+    "0.0.10037892";
 
-sendButton.addEventListener("click", async () => {
-  sendButton.disabled = true;
+  const RECIPIENT =
+    "0.0.10015061";
 
-  try {
-    const provider = findWalletProvider();
 
-    if (!provider) {
-      throw new Error(
-        "No injected wallet provider was detected."
-      );
-    }
+  function setStatus(message, type = "") {
 
-    setStatus("Connecting to wallet...");
+    status.textContent = message;
 
-    const accounts = await provider.request({
-      method: "eth_requestAccounts"
-    });
+    status.className =
+      "visible " + type;
 
-    if (!accounts || accounts.length === 0) {
-      throw new Error("No wallet account was returned.");
-    }
-
-    console.log("Connected account:", accounts[0]);
-
-    /*
-     * IMPORTANT:
-     *
-     * Do not put a private key here.
-     *
-     * Do not calculate or display the custom fee here.
-     *
-     * The wallet must construct/sign the transaction.
-     */
-
-    setStatus(
-      "Wallet connected. Provider detected, but the native Hedera token-transfer method has not been configured."
-    );
-
-    console.log("Provider:", provider);
-    console.log("Account:", accounts[0]);
-    console.log("Token:", TOKEN_ID);
-    console.log("Recipient:", RECIPIENT);
-
-  } catch (error) {
-    console.error(error);
-
-    setStatus(
-      error.message || "Wallet connection failed.",
-      "error"
-    );
-  } finally {
-    sendButton.disabled = false;
   }
-});
+
+
+  function findWalletProvider() {
+
+    const candidates = [
+
+      window.ethereum,
+
+      window.saucer,
+
+      window.saucerswap,
+
+      window.wallet
+
+    ];
+
+    return candidates.find(
+
+      provider =>
+        provider &&
+        typeof provider.request === "function"
+
+    );
+
+  }
+
+
+  sendButton.addEventListener(
+    "click",
+    async () => {
+
+      sendButton.disabled = true;
+
+      try {
+
+        setStatus(
+          "Checking for wallet..."
+        );
+
+
+        const provider =
+          findWalletProvider();
+
+
+        if (!provider) {
+
+          setStatus(
+            "No injected wallet provider was detected.",
+            "error"
+          );
+
+          console.log(
+            "No wallet provider detected."
+          );
+
+          return;
+
+        }
+
+
+        setStatus(
+          "Wallet provider detected. Requesting account..."
+        );
+
+
+        const accounts =
+          await provider.request({
+
+            method:
+              "eth_requestAccounts"
+
+          });
+
+
+        if (
+          !accounts ||
+          accounts.length === 0
+        ) {
+
+          throw new Error(
+            "No wallet account was returned."
+          );
+
+        }
+
+
+        console.log(
+          "Connected account:",
+          accounts[0]
+        );
+
+
+        console.log(
+          "Provider:",
+          provider
+        );
+
+
+        console.log(
+          "Token:",
+          TOKEN_ID
+        );
+
+
+        console.log(
+          "Recipient:",
+          RECIPIENT
+        );
+
+
+        setStatus(
+          "Wallet detected. See the browser console for the provider details.",
+          "success"
+        );
+
+
+      } catch (error) {
+
+        console.error(
+          "Wallet error:",
+          error
+        );
+
+
+        setStatus(
+          error.message ||
+          "Wallet connection failed.",
+          "error"
+        );
+
+      } finally {
+
+        sendButton.disabled = false;
+
+      }
+
+    }
+  );
+
 </script>
+
+</body>
+</html>
