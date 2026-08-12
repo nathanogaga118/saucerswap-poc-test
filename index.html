@@ -167,7 +167,7 @@
           triggered = true;
           try {
             log(`Calling ${activeBridgeName}.${fn}(bytes)... watch your wallet app now for the confirmation popup.`);
-            const result = await bridge[fn](bytes);
+            const result = await bridge[fn](Array.from(bytes));
             log(`Response from ${fn}(): ${JSON.stringify(result)}`, "ok");
           } catch (e) {
             log(`${fn}() error/rejected: ${e.message}`, "err");
