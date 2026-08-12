@@ -1,54 +1,52 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Hedera Custom Fee PoC</title>
 
   <style>
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     body {
       margin: 0;
-      background: #f7f8fa;
+      background: #f5f7fa;
       color: #111827;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
     }
 
-    .wrap {
+    .container {
       max-width: 520px;
-      margin: 0 auto;
-      padding: 28px 18px 50px;
+      margin: auto;
+      padding: 24px 16px 50px;
     }
 
     .card {
-      background: white;
-      border: 1px solid #e5e7eb;
+      background: #fff;
       border-radius: 18px;
       padding: 22px;
-      box-shadow: 0 8px 30px rgba(0,0,0,.06);
+      box-shadow: 0 8px 30px rgba(0,0,0,.08);
     }
 
     h1 {
-      margin: 0 0 8px;
-      font-size: 25px;
+      margin: 0 0 6px;
+      font-size: 24px;
     }
 
     .subtitle {
       color: #6b7280;
-      margin-bottom: 22px;
+      margin-bottom: 20px;
     }
 
     .warning {
       background: #fff7ed;
-      border: 1px solid #fed7aa;
+      border: 1px solid #fdba74;
       color: #9a3412;
+      padding: 14px;
       border-radius: 12px;
-      padding: 13px;
       margin-bottom: 20px;
       font-size: 14px;
+      line-height: 1.5;
     }
 
     .row {
@@ -56,11 +54,7 @@
       justify-content: space-between;
       gap: 15px;
       padding: 11px 0;
-      border-bottom: 1px solid #f0f0f0;
-    }
-
-    .row:last-child {
-      border-bottom: 0;
+      border-bottom: 1px solid #eee;
     }
 
     .label {
@@ -68,23 +62,25 @@
     }
 
     .value {
-      text-align: right;
       font-weight: 600;
+      text-align: right;
       word-break: break-all;
     }
 
     .fee {
       margin: 18px 0;
       padding: 16px;
-      background: #eef6ff;
+      background: #eff6ff;
       border: 1px solid #bfdbfe;
       border-radius: 12px;
     }
 
-    .fee strong {
+    .fee-number {
       display: block;
-      font-size: 23px;
       margin-top: 4px;
+      font-size: 26px;
+      font-weight: 800;
+      color: #1d4ed8;
     }
 
     button {
@@ -92,40 +88,51 @@
       border: 0;
       border-radius: 12px;
       padding: 15px;
-      font-size: 16px;
-      font-weight: 700;
-      cursor: pointer;
       background: #111827;
       color: white;
+      font-size: 16px;
+      font-weight: 700;
+      margin-top: 10px;
     }
 
     button:disabled {
       opacity: .5;
-      cursor: not-allowed;
     }
 
     #status {
-      margin-top: 16px;
-      padding: 13px;
-      border-radius: 10px;
+      margin-top: 15px;
       background: #f3f4f6;
+      border-radius: 10px;
+      padding: 13px;
       white-space: pre-wrap;
       word-break: break-word;
       font-size: 13px;
     }
 
+    textarea {
+      width: 100%;
+      min-height: 110px;
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      font-family: monospace;
+      font-size: 12px;
+      resize: vertical;
+    }
+
     .small {
-      margin-top: 18px;
       color: #6b7280;
       font-size: 12px;
       line-height: 1.5;
+      margin-top: 18px;
     }
   </style>
 </head>
 
 <body>
 
-<div class="wrap">
+<div class="container">
   <div class="card">
 
     <h1>Hedera Custom Fee PoC</h1>
@@ -135,9 +142,9 @@
     </div>
 
     <div class="warning">
-      <strong>HEDERA TESTNET ONLY</strong><br>
-      This demonstration is intended to evaluate how a wallet presents
-      the economic effects of a token transfer containing a native custom fee.
+      <strong>TESTNET ONLY</strong><br>
+      This transaction contains a native 7 HBAR custom fee.
+      Do not approve it unless you understand the fee.
     </div>
 
     <div class="row">
@@ -146,7 +153,7 @@
     </div>
 
     <div class="row">
-      <span class="label">Victim account</span>
+      <span class="label">Victim</span>
       <span class="value">0.0.10034285</span>
     </div>
 
@@ -167,52 +174,76 @@
 
     <div class="fee">
       Native token custom fee
-      <strong>7 HBAR</strong>
-      plus the ordinary Hedera transaction fee.
+      <span class="fee-number">7 HBAR</span>
+      plus the normal Hedera network transaction fee.
     </div>
 
     <button id="connect">
-      Connect Testnet Wallet
+      Connect Wallet
     </button>
 
-    <div id="status">Wallet not connected.</div>
+    <button id="sign" disabled>
+      Sign Test Transaction
+    </button>
+
+    <div id="status">
+Wallet not connected.
+    </div>
 
     <div class="small">
-      Research procedure: compare the fee information displayed by the
-      wallet's signing interface with the native custom-fee configuration
-      recorded on Hedera Testnet. Do not approve a transaction unless the
-      resulting economic effect is understood.
+      The page does not broadcast the transaction. It requests a wallet
+      signature so the wallet approval interface can be inspected.
     </div>
 
   </div>
 </div>
 
 <script>
-(function () {
+(() => {
+
+  /*
+   * Paste the BASE64 serialized transaction produced by your
+   * existing Node.js PoC here.
+   *
+   * Do NOT put a private key in this file.
+   */
+  const TRANSACTION_BYTES_BASE64 = "";
+
   const connectButton = document.getElementById("connect");
+  const signButton = document.getElementById("sign");
   const status = document.getElementById("status");
 
-  function provider() {
-    return window.saucerswapWallet ||
-           window.hashpack ||
-           window.hedera;
+  let wallet = null;
+
+  function findWallet() {
+    return (
+      window.saucerswapWallet ||
+      window.hashpack ||
+      window.hedera ||
+      null
+    );
   }
 
-  connectButton.onclick = async function () {
-    const wallet = provider();
+  connectButton.addEventListener("click", async () => {
+
+    wallet = findWallet();
 
     if (!wallet) {
       status.textContent =
-        "No compatible injected Hedera wallet provider was found.";
+        "No injected Hedera wallet provider found.";
+      return;
+    }
+
+    if (typeof wallet.connect !== "function") {
+      status.textContent =
+        "Wallet provider does not expose connect().";
       return;
     }
 
     try {
-      status.textContent = "Requesting wallet connection...";
 
-      if (typeof wallet.connect !== "function") {
-        throw new Error("Injected wallet does not expose connect().");
-      }
+      status.textContent =
+        "Requesting wallet connection...";
 
       const result = await wallet.connect();
 
@@ -220,15 +251,72 @@
         "Wallet connected.\n\n" +
         JSON.stringify(result, null, 2);
 
-      connectButton.textContent = "Wallet Connected";
+      connectButton.textContent = "Connected";
       connectButton.disabled = true;
+      signButton.disabled = false;
 
     } catch (err) {
+
       status.textContent =
         "Connection failed:\n" +
-        (err && err.message ? err.message : String(err));
+        (err?.message || String(err));
+
     }
-  };
+  });
+
+
+  signButton.addEventListener("click", async () => {
+
+    if (!wallet) {
+      status.textContent = "Wallet is not connected.";
+      return;
+    }
+
+    if (!TRANSACTION_BYTES_BASE64) {
+      status.textContent =
+        "Transaction bytes have not been configured.\n\n" +
+        "Paste the serialized Base64 transaction from your Node PoC " +
+        "into TRANSACTION_BYTES_BASE64.";
+      return;
+    }
+
+    if (typeof wallet.signTransaction !== "function") {
+      status.textContent =
+        "Injected wallet does not expose signTransaction().";
+      return;
+    }
+
+    try {
+
+      signButton.disabled = true;
+
+      status.textContent =
+        "Requesting wallet signature...\n\n" +
+        "The wallet approval interface should now appear.";
+
+      const signed =
+        await wallet.signTransaction(
+          TRANSACTION_BYTES_BASE64
+        );
+
+      status.textContent =
+        "Wallet returned a signature.\n\n" +
+        JSON.stringify(signed, null, 2);
+
+    } catch (err) {
+
+      status.textContent =
+        "Transaction was rejected or failed.\n\n" +
+        (err?.message || String(err));
+
+    } finally {
+
+      signButton.disabled = false;
+
+    }
+
+  });
+
 })();
 </script>
 
