@@ -1,24 +1,26 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1.0"
-  />
+  >
 
-  <title>Hedera Custom Fee Disclosure PoC</title>
+  <title>Hedera Testnet Token Transfer</title>
 
   <style>
     :root {
-      --hedera-purple: #8259ef;
-      --hedera-dark: #171321;
-      --hedera-light: #f7f5fc;
-      --border: #e5e0ef;
-      --text: #211d2b;
-      --muted: #706a7d;
+      --purple: #8259ef;
+      --purple-dark: #6940d9;
+      --dark: #171321;
+      --bg: #f7f6fa;
+      --card: #ffffff;
+      --text: #201c28;
+      --muted: #77717f;
+      --border: #e5e1eb;
       --success: #16875b;
-      --warning: #b56b00;
+      --danger: #c0392b;
     }
 
     * {
@@ -27,25 +29,25 @@
 
     body {
       margin: 0;
+      background: var(--bg);
+      color: var(--text);
       font-family:
         Inter,
         -apple-system,
         BlinkMacSystemFont,
         "Segoe UI",
         sans-serif;
-      background: var(--hedera-light);
-      color: var(--text);
     }
 
-    .header {
-      background: var(--hedera-dark);
+    header {
+      background: var(--dark);
       color: white;
-      padding: 18px 24px;
     }
 
     .header-inner {
-      max-width: 900px;
-      margin: auto;
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 18px 20px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -56,21 +58,20 @@
       align-items: center;
       gap: 12px;
       font-weight: 700;
-      font-size: 18px;
     }
 
     .logo {
       width: 34px;
       height: 34px;
       border-radius: 9px;
-      background: var(--hedera-purple);
+      background: var(--purple);
       display: grid;
       place-items: center;
       font-weight: 900;
     }
 
     .network {
-      font-size: 13px;
+      font-size: 12px;
       padding: 6px 10px;
       border-radius: 20px;
       background: rgba(255,255,255,.1);
@@ -78,47 +79,44 @@
     }
 
     main {
-      max-width: 720px;
-      margin: 50px auto;
+      max-width: 620px;
+      margin: 55px auto;
       padding: 0 20px;
     }
 
     .card {
-      background: white;
+      background: var(--card);
       border: 1px solid var(--border);
       border-radius: 18px;
       padding: 30px;
-      box-shadow: 0 12px 40px rgba(30, 20, 60, .07);
+      box-shadow:
+        0 12px 35px rgba(30, 20, 60, .07);
     }
 
     h1 {
       margin: 0 0 10px;
-      font-size: 30px;
+      font-size: 28px;
     }
 
-    .subtitle {
+    .description {
       color: var(--muted);
       line-height: 1.6;
       margin-bottom: 28px;
     }
 
-    .notice {
+    .testnet {
       background: #f1edff;
-      border: 1px solid #d9ceff;
+      border: 1px solid #ddd3ff;
       border-radius: 12px;
-      padding: 15px;
-      margin-bottom: 25px;
+      padding: 13px 15px;
+      font-size: 13px;
       line-height: 1.5;
-      font-size: 14px;
-    }
-
-    .notice strong {
-      color: var(--hedera-purple);
+      margin-bottom: 25px;
     }
 
     .details {
       border: 1px solid var(--border);
-      border-radius: 14px;
+      border-radius: 13px;
       overflow: hidden;
       margin-bottom: 25px;
     }
@@ -145,24 +143,21 @@
       word-break: break-all;
     }
 
-    .fee {
-      color: var(--warning);
-    }
-
     button {
       width: 100%;
       border: 0;
       border-radius: 12px;
       padding: 15px;
-      background: var(--hedera-purple);
+      background: var(--purple);
       color: white;
       font-size: 16px;
       font-weight: 700;
       cursor: pointer;
+      transition: background .15s;
     }
 
     button:hover {
-      background: #7046df;
+      background: var(--purple-dark);
     }
 
     button:disabled {
@@ -170,37 +165,37 @@
       cursor: not-allowed;
     }
 
-    .status {
-      margin-top: 20px;
+    #status {
+      display: none;
+      margin-top: 18px;
       padding: 14px;
       border-radius: 12px;
       background: #f5f3f8;
       color: var(--muted);
       font-size: 14px;
       line-height: 1.5;
-      display: none;
+      word-break: break-word;
     }
 
-    .status.show {
+    #status.visible {
       display: block;
     }
 
-    .success {
+    #status.success {
       color: var(--success);
+      background: #eef9f4;
+    }
+
+    #status.error {
+      color: var(--danger);
+      background: #fdf0ef;
     }
 
     .research {
       margin-top: 25px;
       color: var(--muted);
-      font-size: 13px;
-      line-height: 1.6;
-    }
-
-    code {
-      background: #f0edf5;
-      padding: 2px 5px;
-      border-radius: 5px;
       font-size: 12px;
+      line-height: 1.6;
     }
 
     footer {
@@ -214,16 +209,18 @@
 
 <body>
 
-<header class="header">
+<header>
   <div class="header-inner">
+
     <div class="brand">
       <div class="logo">H</div>
-      Hedera Research PoC
+      Hedera Testnet
     </div>
 
     <div class="network">
       TESTNET
     </div>
+
   </div>
 </header>
 
@@ -231,24 +228,25 @@
 
   <section class="card">
 
-    <h1>Custom-Fee Disclosure Test</h1>
+    <h1>Token Transfer</h1>
 
-    <div class="subtitle">
-      Controlled Hedera Testnet experiment for examining how a
-      wallet presents token-transfer fees before transaction approval.
+    <div class="description">
+      Transfer one unit of the test token to the designated
+      testnet account using your connected wallet.
     </div>
 
-    <div class="notice">
-      <strong>TESTNET ONLY</strong><br />
-      This experiment uses a test token and testnet accounts.
-      No mainnet funds are involved.
+    <div class="testnet">
+      This is a controlled Hedera Testnet experiment.
+      No mainnet assets are involved.
     </div>
 
     <div class="details">
 
       <div class="row">
         <span class="label">Network</span>
-        <span class="value">Hedera Testnet</span>
+        <span class="value">
+          Hedera Testnet
+        </span>
       </div>
 
       <div class="row">
@@ -261,38 +259,28 @@
       <div class="row">
         <span class="label">Amount</span>
         <span class="value">
-          1 token
+          1
         </span>
       </div>
 
       <div class="row">
-        <span class="label">Fee collector</span>
+        <span class="label">Recipient</span>
         <span class="value">
           0.0.10015061
-        </span>
-      </div>
-
-      <div class="row">
-        <span class="label">Configured custom fee</span>
-        <span class="value fee">
-          7 HBAR
         </span>
       </div>
 
     </div>
 
     <button id="sendButton">
-      Send 1 Test Token
+      Send 1 Token
     </button>
 
-    <div id="status" class="status"></div>
+    <div id="status"></div>
 
     <div class="research">
-      <strong>Research note:</strong>
-      The purpose of this page is to initiate a legitimate
-      testnet token transfer and observe the wallet's native
-      transaction-approval interface. The page does not attempt
-      to reproduce or replace the wallet's fee display.
+      Testnet research interface. Transaction approval and
+      transaction details are handled by the connected wallet.
     </div>
 
   </section>
@@ -300,55 +288,75 @@
 </main>
 
 <footer>
-  Hedera Testnet Security Research PoC
+  Hedera Testnet Research
 </footer>
 
 <script>
-  const sendButton = document.getElementById("sendButton");
-  const status = document.getElementById("status");
+  const sendButton =
+    document.getElementById("sendButton");
 
-  function showStatus(message, success = false) {
-    status.className = "status show";
-    status.innerHTML = success
-      ? `<span class="success">${message}</span>`
-      : message;
+  const status =
+    document.getElementById("status");
+
+  function setStatus(message, type = "") {
+    status.textContent = message;
+    status.className = "visible " + type;
   }
 
   sendButton.addEventListener("click", async () => {
 
     sendButton.disabled = true;
 
-    showStatus(
-      "Preparing the testnet transaction..."
+    setStatus(
+      "Connecting to wallet..."
     );
 
     /*
      * Wallet integration goes here.
      *
-     * IMPORTANT:
-     * Do not create a fake approval dialog here.
+     * The page intentionally does NOT calculate,
+     * display, or describe any custom fee.
      *
-     * The objective of this PoC is to let the connected
-     * wallet display its own native transaction confirmation.
-     *
-     * Transaction:
-     *
-     * Token:  0.0.10037892
-     * From:   connected victim/test account
-     * To:     0.0.10015061
-     * Amount: 1
-     *
-     * The token itself carries the configured 7 HBAR
-     * custom fee.
+     * The wallet should construct and display the
+     * transaction confirmation itself.
      */
 
-    showStatus(
-      "Wallet integration is ready to be connected. " +
-      "The next step is to submit the real Hedera " +
-      "testnet transaction through the wallet."
-    );
+    try {
 
-    sendButton.disabled = false;
+      /*
+       * TODO:
+       *
+       * 1. Connect to the wallet.
+       * 2. Construct the Hedera token transfer:
+       *
+       *    Token:     0.0.10037892
+       *    Amount:    1
+       *    Recipient: 0.0.10015061
+       *
+       * 3. Request the wallet to sign/submit it.
+       *
+       * Do NOT put a private key in this page.
+       */
+
+      setStatus(
+        "Wallet integration has not been connected yet."
+      );
+
+    } catch (error) {
+
+      console.error(error);
+
+      setStatus(
+        "Transaction could not be submitted.",
+        "error"
+      );
+
+    } finally {
+
+      sendButton.disabled = false;
+
+    }
+
   });
 </script>
 
