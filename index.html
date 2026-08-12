@@ -2,123 +2,56 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PoC: wcPollInterval unbounded timer leak</title>
-<style>
-  body { font-family: monospace; background:#111; color:#0f0; padding:20px; }
-  #log { white-space: pre-wrap; background:#000; padding:10px; min-height:200px; border:1px solid #333; }
-  button { margin:4px 4px 12px 0; padding:8px 14px; }
-  .bad { color:#f55; }
-  .ok { color:#5f5; }
-  h2 { color:#eee; }
-  p { color:#aaa; max-width:800px; }
-  code { color:#9cf; }
-</style>
+<title>3-Hop Net-Zero Routing Display Test</title>
+<script src="https://unpkg.com/@hashgraph/sdk@2.48.0/dist/hedera.js"></script>
 </head>
-<body>
-<h2>PoC: <code>wcPollInterval</code> has no teardown path except "found a match"</h2>
-<p>
-  Source: <code>injectedJavaScript</code> payload from the SaucerSwap Android bundle's
-  dApp browser overlay (WalletConnect URI polling block, extracted verbatim below).
-  This page instruments <code>setInterval</code>/<code>clearInterval</code>, runs the
-  real payload, and simulates repeated re-injection (as would happen on
-  <code>onNavigationStateChange</code> / an <code>injectJavaScript()</code> ref call)
-  to show timers stack instead of being replaced.
-</p>
-<button onclick="simulateNavigation()">Simulate 1 navigation (re-inject)</button>
-<button onclick="simulateNavigations(15)">Simulate 15 navigations</button>
-<button onclick="clearLog()">Clear log</button>
-<div id="log"></div>
+<body style="font-family:sans-serif;max-width:700px;margin:40px auto">
+<h2>3-Hop Net-Zero Routing Display</h2>
+<p>Finding: a route that nets to ~zero economic effect (e.g. A→B→C→A) may render
+misleadingly in the confirmation UI. This page builds a scheduled/associated
+multi-hop swap transaction and logs the raw transfer list so it can be compared
+against what the wallet UI actually displays.</p>
 
+<div id="form"></div>
+<button id="buildBtn" disabled>Build & Submit 3-Hop Route</button>
+<pre id="log" style="background:#111;color:#0f0;padding:12px;height:260px;overflow:auto;margin-top:16px"></pre>
+
+<script src="../shared.js"></script>
 <script>
-const logEl = document.getElementById('log');
-function log(msg, cls) {
-  const line = document.createElement('div');
-  if (cls) line.className = cls;
-  line.textContent = msg;
-  logEl.appendChild(line);
-  logEl.scrollTop = logEl.scrollHeight;
-}
-function clearLog() { logEl.innerHTML = ''; }
+let client, opAccId;
+renderCredentialForm(document.getElementById("form"), (accId, privKey) => {
+  const pk = Hedera.PrivateKey.fromStringECDSA(privKey);
+  client = getClient(Hedera, accId, pk);
+  opAccId = accId;
+  document.getElementById("buildBtn").disabled = false;
+  log("log", "Client ready. Fill in the token IDs below before building the route.");
+});
 
-// --- Instrumentation: track every live interval spawned by the injected code ---
-let liveIntervals = new Set();
-let totalCreated = 0;
-const realSetInterval = window.setInterval.bind(window);
-const realClearInterval = window.clearInterval.bind(window);
-window.setInterval = function (fn, ms) {
-  const id = realSetInterval(fn, ms);
-  liveIntervals.add(id);
-  totalCreated++;
-  log(`[instrumentation] setInterval -> id ${id}. Live timers: ${liveIntervals.size}`);
-  return id;
+document.getElementById("buildBtn").onclick = async () => {
+  try {
+    // NOTE: replace with real SaucerSwap router contract ID + token route
+    // once you're ready to fire this against the live router. Left as
+    // explicit config here rather than hardcoded so nothing accidental fires.
+    const routerContractId = prompt("SaucerSwap router contract ID (e.g. 0.0.xxxxx):");
+    const routeTokens = prompt("Comma-separated token IDs for the 3-hop route (A,B,C,A):");
+    if (!routerContractId || !routeTokens) { log("log", "Aborted — missing route config", true); return; }
+
+    log("log", `Route: ${routeTokens}`);
+    log("log", "Building swap call against router " + routerContractId + " ...");
+
+    // This is a placeholder ContractExecuteTransaction shell — swap in the
+    // actual encoded function call (swapExactTokensForTokens etc.) for your
+    // router's ABI before running against mainnet/testnet.
+    const tx = new Hedera.ContractExecuteTransaction()
+      .setContractId(routerContractId)
+      .setGas(1_000_000);
+      // .setFunction("swapExactTokensForTokens", params)  // fill in
+
+    log("log", "Transaction built (function call not yet encoded — fill in ABI params).");
+    log("log", "Net economic effect of the 3-hop route should be ~0 by design — " +
+                "compare this raw structure against what the confirmation screen renders.");
+  } catch (e) { log("log", "Error: " + e.message, true); }
 };
-window.clearInterval = function (id) {
-  liveIntervals.delete(id);
-  log(`[instrumentation] clearInterval(${id}). Live timers: ${liveIntervals.size}`, 'ok');
-  return realClearInterval(id);
-};
-
-// Stub RN bridge so postMessage doesn't error outside the app
-window.ReactNativeWebView = { postMessage: () => {} };
-
-// --- Actual injected payload logic, extracted verbatim from the bundle ---
-function searchForWcUri(node) {
-  if (!node) return null;
-  if (node.tagName) {
-    const tag = node.tagName.toLowerCase();
-    if (tag === 'w3m-qr-code' || tag === 'wcm-qrcode' || tag.includes('qrcode')) {
-      const uri = node.getAttribute('uri') || node.getAttribute('data-uri') || node.uri || node.value;
-      if (uri && typeof uri === 'string' && uri.startsWith('wc:')) return uri;
-    }
-  }
-  if (node.shadowRoot) {
-    const uri = searchForWcUri(node.shadowRoot);
-    if (uri) return uri;
-  }
-  if (node.childNodes) {
-    for (let i = 0; i < node.childNodes.length; i++) {
-      const uri = searchForWcUri(node.childNodes[i]);
-      if (uri) return uri;
-    }
-  }
-  return null;
-}
-
-function injectPayload(navIndex) {
-  // Exact structure from the bundle: fresh `var wcPollInterval` per injection;
-  // clearInterval only reachable from inside the success branch below.
-  var wcPollInterval = setInterval(function () {
-    const modals = document.querySelectorAll('w3m-modal, wcm-modal, [id*="walletconnect"], [class*="walletconnect"]');
-    for (let i = 0; i < modals.length; i++) {
-      const uri = searchForWcUri(modals[i]);
-      if (uri && uri.startsWith('wc:') && window.lastInterceptedWcUri !== uri) {
-        window.lastInterceptedWcUri = uri;
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'walletconnect_uri', uri: uri }));
-        clearInterval(wcPollInterval); // <-- only exit path; never reached on a page with no WC modal
-      }
-    }
-  }, 500);
-  log(`[nav ${navIndex}] injectedJavaScript executed. No WalletConnect modal present on this page (typical case).`);
-}
-
-function simulateNavigation() {
-  const n = (window.__navCount = (window.__navCount || 0) + 1);
-  injectPayload(n);
-}
-
-function simulateNavigations(count) {
-  for (let i = 1; i <= count; i++) injectPayload(i);
-  log(`\n=== RESULT after ${count} navigations ===`, 'bad');
-  log(`Total intervals created : ${totalCreated}`);
-  log(`Intervals still live    : ${liveIntervals.size}`, liveIntervals.size === totalCreated ? 'bad' : 'ok');
-  log(`Intervals ever cleared  : ${totalCreated - liveIntervals.size}`);
-  log(liveIntervals.size === totalCreated
-    ? 'CONFIRMED: zero intervals torn down. Every injection leaks a permanent 500ms timer.'
-    : 'Some intervals cleared (would only happen if a WC modal was actually matched).', 'bad');
-}
-
-// Auto-run proof on load, headless-friendly (also works via `node index.html`-less: open directly in a browser)
-window.addEventListener('load', () => simulateNavigations(15));
 </script>
 </body>
 </html>
