@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Wallet Bridge Fee Disclosure PoC</title>
-<script src="https://unpkg.com/@hashgraph/sdk@2/dist/browser/esm/index.min.js" type="module" id="sdk-module"></script>
+<script src="./hedera-sdk.bundle.js"></script>
 <style>
   body { font-family: -apple-system, sans-serif; background: #0d0d0d; color: #e6e6e6; padding: 16px; margin: 0; }
   h1 { font-size: 18px; margin-bottom: 4px; }
@@ -141,11 +141,13 @@
       return;
     }
 
-    log("Building TransferTransaction bytes via @hashgraph/sdk...");
+    log("Building TransferTransaction bytes via bundled @hashgraph/sdk...");
     try {
-      const { TransferTransaction, AccountId, TokenId } = await import(
-        "https://unpkg.com/@hashgraph/sdk@2/dist/browser/esm/index.min.js"
-      );
+      if (!window.HederaSDK) {
+        log("HederaSDK bundle not loaded — check that hedera-sdk.bundle.js is hosted next to this HTML file.", "err");
+        return;
+      }
+      const { TransferTransaction, AccountId, TokenId } = window.HederaSDK;
       const tx = new TransferTransaction()
         .addTokenTransfer(TokenId.fromString(tokenId), AccountId.fromString(senderId), -amount)
         .addTokenTransfer(TokenId.fromString(tokenId), AccountId.fromString(recipientId), amount)
