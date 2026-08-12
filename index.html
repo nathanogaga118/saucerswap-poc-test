@@ -1,57 +1,356 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="utf-8">
-<title>3-Hop Net-Zero Routing Display Test</title>
-<script src="https://unpkg.com/@hashgraph/sdk@2.48.0/dist/hedera.js"></script>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+
+  <title>Hedera Custom Fee Disclosure PoC</title>
+
+  <style>
+    :root {
+      --hedera-purple: #8259ef;
+      --hedera-dark: #171321;
+      --hedera-light: #f7f5fc;
+      --border: #e5e0ef;
+      --text: #211d2b;
+      --muted: #706a7d;
+      --success: #16875b;
+      --warning: #b56b00;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family:
+        Inter,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+      background: var(--hedera-light);
+      color: var(--text);
+    }
+
+    .header {
+      background: var(--hedera-dark);
+      color: white;
+      padding: 18px 24px;
+    }
+
+    .header-inner {
+      max-width: 900px;
+      margin: auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      font-size: 18px;
+    }
+
+    .logo {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      background: var(--hedera-purple);
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+    }
+
+    .network {
+      font-size: 13px;
+      padding: 6px 10px;
+      border-radius: 20px;
+      background: rgba(255,255,255,.1);
+      color: #d9d0ff;
+    }
+
+    main {
+      max-width: 720px;
+      margin: 50px auto;
+      padding: 0 20px;
+    }
+
+    .card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 30px;
+      box-shadow: 0 12px 40px rgba(30, 20, 60, .07);
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: 30px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      line-height: 1.6;
+      margin-bottom: 28px;
+    }
+
+    .notice {
+      background: #f1edff;
+      border: 1px solid #d9ceff;
+      border-radius: 12px;
+      padding: 15px;
+      margin-bottom: 25px;
+      line-height: 1.5;
+      font-size: 14px;
+    }
+
+    .notice strong {
+      color: var(--hedera-purple);
+    }
+
+    .details {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      margin-bottom: 25px;
+    }
+
+    .row {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .row:last-child {
+      border-bottom: 0;
+    }
+
+    .label {
+      color: var(--muted);
+    }
+
+    .value {
+      font-weight: 600;
+      text-align: right;
+      word-break: break-all;
+    }
+
+    .fee {
+      color: var(--warning);
+    }
+
+    button {
+      width: 100%;
+      border: 0;
+      border-radius: 12px;
+      padding: 15px;
+      background: var(--hedera-purple);
+      color: white;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #7046df;
+    }
+
+    button:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+
+    .status {
+      margin-top: 20px;
+      padding: 14px;
+      border-radius: 12px;
+      background: #f5f3f8;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+      display: none;
+    }
+
+    .status.show {
+      display: block;
+    }
+
+    .success {
+      color: var(--success);
+    }
+
+    .research {
+      margin-top: 25px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    code {
+      background: #f0edf5;
+      padding: 2px 5px;
+      border-radius: 5px;
+      font-size: 12px;
+    }
+
+    footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+      padding: 30px;
+    }
+  </style>
 </head>
-<body style="font-family:sans-serif;max-width:700px;margin:40px auto">
-<h2>3-Hop Net-Zero Routing Display</h2>
-<p>Finding: a route that nets to ~zero economic effect (e.g. A→B→C→A) may render
-misleadingly in the confirmation UI. This page builds a scheduled/associated
-multi-hop swap transaction and logs the raw transfer list so it can be compared
-against what the wallet UI actually displays.</p>
 
-<div id="form"></div>
-<button id="buildBtn" disabled>Build & Submit 3-Hop Route</button>
-<pre id="log" style="background:#111;color:#0f0;padding:12px;height:260px;overflow:auto;margin-top:16px"></pre>
+<body>
 
-<script src="../shared.js"></script>
+<header class="header">
+  <div class="header-inner">
+    <div class="brand">
+      <div class="logo">H</div>
+      Hedera Research PoC
+    </div>
+
+    <div class="network">
+      TESTNET
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <section class="card">
+
+    <h1>Custom-Fee Disclosure Test</h1>
+
+    <div class="subtitle">
+      Controlled Hedera Testnet experiment for examining how a
+      wallet presents token-transfer fees before transaction approval.
+    </div>
+
+    <div class="notice">
+      <strong>TESTNET ONLY</strong><br />
+      This experiment uses a test token and testnet accounts.
+      No mainnet funds are involved.
+    </div>
+
+    <div class="details">
+
+      <div class="row">
+        <span class="label">Network</span>
+        <span class="value">Hedera Testnet</span>
+      </div>
+
+      <div class="row">
+        <span class="label">Token</span>
+        <span class="value">
+          0.0.10037892
+        </span>
+      </div>
+
+      <div class="row">
+        <span class="label">Amount</span>
+        <span class="value">
+          1 token
+        </span>
+      </div>
+
+      <div class="row">
+        <span class="label">Fee collector</span>
+        <span class="value">
+          0.0.10015061
+        </span>
+      </div>
+
+      <div class="row">
+        <span class="label">Configured custom fee</span>
+        <span class="value fee">
+          7 HBAR
+        </span>
+      </div>
+
+    </div>
+
+    <button id="sendButton">
+      Send 1 Test Token
+    </button>
+
+    <div id="status" class="status"></div>
+
+    <div class="research">
+      <strong>Research note:</strong>
+      The purpose of this page is to initiate a legitimate
+      testnet token transfer and observe the wallet's native
+      transaction-approval interface. The page does not attempt
+      to reproduce or replace the wallet's fee display.
+    </div>
+
+  </section>
+
+</main>
+
+<footer>
+  Hedera Testnet Security Research PoC
+</footer>
+
 <script>
-let client, opAccId;
-renderCredentialForm(document.getElementById("form"), (accId, privKey) => {
-  const pk = Hedera.PrivateKey.fromStringECDSA(privKey);
-  client = getClient(Hedera, accId, pk);
-  opAccId = accId;
-  document.getElementById("buildBtn").disabled = false;
-  log("log", "Client ready. Fill in the token IDs below before building the route.");
-});
+  const sendButton = document.getElementById("sendButton");
+  const status = document.getElementById("status");
 
-document.getElementById("buildBtn").onclick = async () => {
-  try {
-    // NOTE: replace with real SaucerSwap router contract ID + token route
-    // once you're ready to fire this against the live router. Left as
-    // explicit config here rather than hardcoded so nothing accidental fires.
-    const routerContractId = prompt("SaucerSwap router contract ID (e.g. 0.0.xxxxx):");
-    const routeTokens = prompt("Comma-separated token IDs for the 3-hop route (A,B,C,A):");
-    if (!routerContractId || !routeTokens) { log("log", "Aborted — missing route config", true); return; }
+  function showStatus(message, success = false) {
+    status.className = "status show";
+    status.innerHTML = success
+      ? `<span class="success">${message}</span>`
+      : message;
+  }
 
-    log("log", `Route: ${routeTokens}`);
-    log("log", "Building swap call against router " + routerContractId + " ...");
+  sendButton.addEventListener("click", async () => {
 
-    // This is a placeholder ContractExecuteTransaction shell — swap in the
-    // actual encoded function call (swapExactTokensForTokens etc.) for your
-    // router's ABI before running against mainnet/testnet.
-    const tx = new Hedera.ContractExecuteTransaction()
-      .setContractId(routerContractId)
-      .setGas(1_000_000);
-      // .setFunction("swapExactTokensForTokens", params)  // fill in
+    sendButton.disabled = true;
 
-    log("log", "Transaction built (function call not yet encoded — fill in ABI params).");
-    log("log", "Net economic effect of the 3-hop route should be ~0 by design — " +
-                "compare this raw structure against what the confirmation screen renders.");
-  } catch (e) { log("log", "Error: " + e.message, true); }
-};
+    showStatus(
+      "Preparing the testnet transaction..."
+    );
+
+    /*
+     * Wallet integration goes here.
+     *
+     * IMPORTANT:
+     * Do not create a fake approval dialog here.
+     *
+     * The objective of this PoC is to let the connected
+     * wallet display its own native transaction confirmation.
+     *
+     * Transaction:
+     *
+     * Token:  0.0.10037892
+     * From:   connected victim/test account
+     * To:     0.0.10015061
+     * Amount: 1
+     *
+     * The token itself carries the configured 7 HBAR
+     * custom fee.
+     */
+
+    showStatus(
+      "Wallet integration is ready to be connected. " +
+      "The next step is to submit the real Hedera " +
+      "testnet transaction through the wallet."
+    );
+
+    sendButton.disabled = false;
+  });
 </script>
+
 </body>
 </html>
