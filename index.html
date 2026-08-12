@@ -147,15 +147,18 @@
         log("HederaSDK bundle not loaded — check that hedera-sdk.bundle.js is hosted next to this HTML file.", "err");
         return;
       }
-      const { TransferTransaction, AccountId, TokenId } = window.HederaSDK;
+      const { TransferTransaction, AccountId, TokenId, TransactionId } = window.HederaSDK;
+      const senderAccountId = AccountId.fromString(senderId);
       const tx = new TransferTransaction()
-        .addTokenTransfer(TokenId.fromString(tokenId), AccountId.fromString(senderId), -amount)
+        .addTokenTransfer(TokenId.fromString(tokenId), senderAccountId, -amount)
         .addTokenTransfer(TokenId.fromString(tokenId), AccountId.fromString(recipientId), amount)
-        .setTransactionId(undefined) // let wallet fill in
-        .setMaxTransactionFee(100000000); // 1 HBAR max, adjust as needed
+        .setTransactionId(TransactionId.generate(senderAccountId))
+        .setNodeAccountIds([new AccountId(0, 0, 3)]) // testnet node 0.0.3
+        .setMaxTransactionFee(100000000) // 1 HBAR max, adjust as needed
+        .freeze();
 
-      const bytes = tx.toBytes ? tx.toBytes() : null;
-      log(`Transaction built. Byte length: ${bytes ? bytes.length : "n/a"}`, "info");
+      const bytes = tx.toBytes();
+      log(`Transaction built and frozen. Byte length: ${bytes.length}`, "info");
 
       const attempts = ["signTransaction", "sendTransaction", "signAndSendTransaction", "executeTransaction"];
       let triggered = false;
