@@ -1,1 +1,813 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SaucerSwap Scheduled Transaction Test</title>
+
+<script src="./hedera-sdk.bundle.js"></script>
+
+<style>
+body {
+    font-family: Arial, sans-serif;
+    background: #0d0d0d;
+    color: #eee;
+    padding: 16px;
+    margin: 0;
+}
+
+h1 {
+    font-size: 19px;
+}
+
+.sub {
+    color: #aaa;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+button {
+    width: 100%;
+    padding: 13px;
+    margin-top: 10px;
+    border: 0;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: bold;
+}
+
+#discover {
+    background: #2b6cb0;
+    color: white;
+}
+
+#connect {
+    background: #38a169;
+    color: white;
+}
+
+#inspect {
+    background: #805ad5;
+    color: white;
+}
+
+#test {
+    background: #c53030;
+    color: white;
+}
+
+#log {
+    margin-top: 15px;
+    background: #111;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 10px;
+    height: 450px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.ok { color: #68d391; }
+.err { color: #fc8181; }
+.info { color: #63b3ed; }
+.warn { color: #f6ad55; }
+</style>
+</head>
+
+<body>
+
+<h1>SaucerSwap Scheduled Transaction Test</h1>
+
+<div class="sub">
+Hedera Testnet only.<br>
+This page discovers the injected wallet bridge and displays the
+available Hedera SDK APIs.
+</div>
+
+<button id="discover">
+1. Discover Injected Bridge
+</button>
+
+<button id="connect">
+2. Connect Wallet
+</button>
+
+<button id="inspect">
+3. Inspect Hedera SDK
+</button>
+
+<button id="test">
+4. Prepare Scheduled Self-Transfer
+</button>
+
+<div style="
+margin-top:12px;
+font-size:12px;
+color:#777;
+line-height:1.6;
+">
+TESTNET ONLY<br>
+Account: 0.0.10034285<br>
+Recipient: 0.0.10034285<br>
+Intended amount: 1 tinybar
+</div>
+
+<div id="log"></div>
+
+
+<script>
+
+/* =====================================================
+   LOGGER
+===================================================== */
+
+var logBox =
+    document.getElementById("log");
+
+function log(message, cls) {
+
+    var line =
+        document.createElement("div");
+
+    if (cls) {
+        line.className = cls;
+    }
+
+    line.textContent =
+        "[" +
+        new Date().toLocaleTimeString() +
+        "] " +
+        message;
+
+    logBox.appendChild(line);
+
+    logBox.scrollTop =
+        logBox.scrollHeight;
+}
+
+
+/* =====================================================
+   INITIAL STATUS
+===================================================== */
+
+log(
+    "JavaScript loaded successfully.",
+    "ok"
+);
+
+
+/* =====================================================
+   BRIDGE
+===================================================== */
+
+var bridgeName = null;
+
+var bridgeCandidates = [
+    "hashpack",
+    "saucerswapWallet",
+    "hashconnect",
+    "hederaWallet"
+];
+
+
+function inspectBridge(object, name) {
+
+    try {
+
+        var keys =
+            Object.keys(object);
+
+        var prototype =
+            Object.getPrototypeOf(object);
+
+        if (prototype) {
+
+            keys =
+                keys.concat(
+                    Object.getOwnPropertyNames(
+                        prototype
+                    )
+                );
+
+        }
+
+        keys =
+            Array.from(
+                new Set(keys)
+            );
+
+
+        keys.forEach(function(key) {
+
+            if (key === "constructor") {
+                return;
+            }
+
+            var type;
+
+            try {
+                type =
+                    typeof object[key];
+            } catch (e) {
+                type =
+                    "unreadable";
+            }
+
+            log(
+                "window." +
+                name +
+                "." +
+                key +
+                " -> " +
+                type,
+                "info"
+            );
+
+        });
+
+    } catch (e) {
+
+        log(
+            "Bridge inspection error: " +
+            e.message,
+            "err"
+        );
+
+    }
+}
+
+
+/* =====================================================
+   DISCOVER BUTTON
+===================================================== */
+
+document
+.getElementById("discover")
+.addEventListener(
+"click",
+function() {
+
+    log(
+        "Scanning for wallet bridges...",
+        "info"
+    );
+
+    var found = 0;
+
+    bridgeCandidates.forEach(
+        function(name) {
+
+            try {
+
+                if (
+                    window[name]
+                ) {
+
+                    found++;
+
+                    if (!bridgeName) {
+                        bridgeName =
+                            name;
+                    }
+
+                    log(
+                        "FOUND window." +
+                        name,
+                        "ok"
+                    );
+
+                    inspectBridge(
+                        window[name],
+                        name
+                    );
+
+                }
+
+            } catch (e) {
+
+                log(
+                    name +
+                    ": " +
+                    e.message,
+                    "err"
+                );
+
+            }
+
+        }
+    );
+
+
+    if (!found) {
+
+        log(
+            "No injected bridge found.",
+            "err"
+        );
+
+    } else {
+
+        log(
+            "Active bridge: " +
+            bridgeName,
+            "ok"
+        );
+
+    }
+
+});
+
+
+/* =====================================================
+   CONNECT BUTTON
+===================================================== */
+
+document
+.getElementById("connect")
+.addEventListener(
+"click",
+async function() {
+
+    if (!bridgeName) {
+
+        log(
+            "Run Discover first.",
+            "err"
+        );
+
+        return;
+    }
+
+
+    var bridge =
+        window[bridgeName];
+
+
+    if (
+        typeof bridge.connect !==
+        "function"
+    ) {
+
+        log(
+            "connect() unavailable.",
+            "err"
+        );
+
+        return;
+    }
+
+
+    try {
+
+        log(
+            "Calling " +
+            bridgeName +
+            ".connect()...",
+            "info"
+        );
+
+
+        var result =
+            await bridge.connect();
+
+
+        log(
+            "Connected: " +
+            JSON.stringify(
+                result
+            ),
+            "ok"
+        );
+
+
+    } catch (e) {
+
+        log(
+            "Connection failed: " +
+            (
+                e.message ||
+                e
+            ),
+            "err"
+        );
+
+    }
+
+});
+
+
+/* =====================================================
+   SDK INSPECTION
+===================================================== */
+
+document
+.getElementById("inspect")
+.addEventListener(
+"click",
+function() {
+
+    log(
+        "==============================",
+        "info"
+    );
+
+    log(
+        "HEDERA SDK INSPECTION",
+        "info"
+    );
+
+    log(
+        "==============================",
+        "info"
+    );
+
+
+    if (
+        !window.HederaSDK
+    ) {
+
+        log(
+            "window.HederaSDK NOT FOUND.",
+            "err"
+        );
+
+        log(
+            "The bundle may not be exporting itself as window.HederaSDK.",
+            "warn"
+        );
+
+        return;
+    }
+
+
+    log(
+        "window.HederaSDK detected.",
+        "ok"
+    );
+
+
+    var sdk =
+        window.HederaSDK;
+
+
+    var exports =
+        Object.keys(
+            sdk
+        ).sort();
+
+
+    log(
+        "Total exports: " +
+        exports.length,
+        "info"
+    );
+
+
+    var interesting = [
+        "Hbar",
+        "HbarUnit",
+        "AccountId",
+        "TransactionId",
+        "TransferTransaction",
+        "ScheduleCreateTransaction",
+        "ScheduleSignTransaction",
+        "ScheduleInfoQuery",
+        "ScheduleInfo"
+    ];
+
+
+    log(
+        "",
+        "info"
+    );
+
+    log(
+        "IMPORTANT EXPORTS:",
+        "warn"
+    );
+
+
+    interesting.forEach(
+        function(name) {
+
+            if (
+                Object.prototype
+                .hasOwnProperty
+                .call(
+                    sdk,
+                    name
+                )
+            ) {
+
+                log(
+                    "AVAILABLE: " +
+                    name,
+                    "ok"
+                );
+
+            } else {
+
+                log(
+                    "MISSING: " +
+                    name,
+                    "err"
+                );
+
+            }
+
+        }
+    );
+
+
+    log(
+        "",
+        "info"
+    );
+
+    log(
+        "ALL SDK EXPORTS:",
+        "info"
+    );
+
+
+    exports.forEach(
+        function(name) {
+
+            log(
+                "SDK." +
+                name,
+                "info"
+            );
+
+        }
+    );
+
+
+});
+
+
+/* =====================================================
+   PREPARE TEST
+===================================================== */
+
+document
+.getElementById("test")
+.addEventListener(
+"click",
+function() {
+
+    log(
+        "Preparing scheduled self-transfer...",
+        "info"
+    );
+
+
+    if (
+        !window.HederaSDK
+    ) {
+
+        log(
+            "HederaSDK unavailable.",
+            "err"
+        );
+
+        return;
+    }
+
+
+    var sdk =
+        window.HederaSDK;
+
+
+    /*
+     * Don't guess the SDK API.
+     * Display exactly what is available.
+     */
+
+    if (
+        !sdk.ScheduleCreateTransaction
+    ) {
+
+        log(
+            "ScheduleCreateTransaction is not exported by this bundle.",
+            "err"
+        );
+
+        log(
+            "Run SDK inspection and provide the output.",
+            "warn"
+        );
+
+        return;
+    }
+
+
+    if (
+        !sdk.TransferTransaction
+    ) {
+
+        log(
+            "TransferTransaction unavailable.",
+            "err"
+        );
+
+        return;
+    }
+
+
+    if (
+        !sdk.AccountId
+    ) {
+
+        log(
+            "AccountId unavailable.",
+            "err"
+        );
+
+        return;
+    }
+
+
+    /*
+     * Verify Hbar API before constructing
+     * an amount.
+     */
+
+    if (
+        !sdk.Hbar ||
+        typeof sdk.Hbar.fromTinybars !==
+        "function"
+    ) {
+
+        log(
+            "Hbar.fromTinybars() unavailable.",
+            "err"
+        );
+
+        log(
+            "Not constructing a transaction with a plain numeric amount.",
+            "warn"
+        );
+
+        return;
+    }
+
+
+    log(
+        "Required SDK APIs are present.",
+        "ok"
+    );
+
+
+    try {
+
+        var account =
+            sdk.AccountId.fromString(
+                "0.0.10034285"
+            );
+
+
+        var amount =
+            sdk.Hbar.fromTinybars(
+                "1"
+            );
+
+
+        var negative =
+            sdk.Hbar.fromTinybars(
+                "-1"
+            );
+
+
+        log(
+            "Amount: exactly 1 tinybar.",
+            "ok"
+        );
+
+        log(
+            "HBAR value: 0.00000001 HBAR.",
+            "info"
+        );
+
+
+        /*
+         * Underlying self-transfer.
+         */
+
+        var transfer =
+            new sdk.TransferTransaction()
+                .addHbarTransfer(
+                    account,
+                    negative
+                )
+                .addHbarTransfer(
+                    account,
+                    amount
+                );
+
+
+        log(
+            "Underlying self-transfer constructed.",
+            "ok"
+        );
+
+
+        /*
+         * ScheduleCreate.
+         */
+
+        var schedule =
+            new sdk.ScheduleCreateTransaction()
+                .setScheduledTransaction(
+                    transfer
+                );
+
+
+        log(
+            "ScheduleCreate constructed.",
+            "ok"
+        );
+
+
+        /*
+         * Serialize only.
+         */
+
+        var frozen =
+            schedule.freeze();
+
+
+        var bytes =
+            frozen.toBytes();
+
+
+        log(
+            "Serialized transaction: " +
+            bytes.length +
+            " bytes.",
+            "info"
+        );
+
+
+        log(
+            "================================",
+            "ok"
+        );
+
+        log(
+            "SCHEDULED SELF-TRANSFER READY",
+            "ok"
+        );
+
+        log(
+            "================================",
+            "ok"
+        );
+
+
+        log(
+            "Account: 0.0.10034285",
+            "info"
+        );
+
+        log(
+            "Recipient: 0.0.10034285",
+            "info"
+        );
+
+        log(
+            "Amount: 1 tinybar",
+            "info"
+        );
+
+
+        log(
+            "No transaction was submitted.",
+            "warn"
+        );
+
+
+    } catch (e) {
+
+        log(
+            "Construction error: " +
+            (
+                e.message ||
+                e
+            ),
+            "err"
+        );
+
+    }
+
+});
+
+
+</script>
+
+</body>
+</html>
