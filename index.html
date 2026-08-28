@@ -1,40 +1,60 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SaucerSwap Scheduled Transaction Test</title>
+<title>SaucerSwap Wallet Payer/Sender Test</title>
 
 <script src="./hedera-sdk.bundle.js"></script>
 
 <style>
 body {
-    font-family: Arial, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     background: #0d0d0d;
-    color: #eee;
+    color: #e6e6e6;
     padding: 16px;
     margin: 0;
 }
 
 h1 {
     font-size: 19px;
+    margin-bottom: 5px;
 }
 
 .sub {
-    color: #aaa;
+    color: #999;
     font-size: 12px;
     line-height: 1.5;
+    margin-bottom: 18px;
+}
+
+label {
+    display: block;
+    color: #aaa;
+    font-size: 12px;
+    margin-top: 10px;
+}
+
+input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px;
+    margin-top: 4px;
+    border-radius: 6px;
+    border: 1px solid #333;
+    background: #181818;
+    color: white;
+    font-size: 14px;
 }
 
 button {
     width: 100%;
-    padding: 13px;
-    margin-top: 10px;
-    border: 0;
+    padding: 12px;
+    margin-top: 11px;
+    border: none;
     border-radius: 8px;
     font-size: 15px;
-    font-weight: bold;
+    font-weight: 600;
 }
 
 #discover {
@@ -47,765 +67,742 @@ button {
     color: white;
 }
 
-#inspect {
+#build {
     background: #805ad5;
     color: white;
 }
 
-#test {
+#sign {
     background: #c53030;
     color: white;
 }
 
+button:disabled {
+    opacity: .45;
+}
+
+.panel {
+    margin-top: 15px;
+    padding: 12px;
+    background: #151515;
+    border: 1px solid #292929;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
 #log {
     margin-top: 15px;
-    background: #111;
-    border: 1px solid #333;
+    background: #080808;
+    border: 1px solid #222;
     border-radius: 8px;
     padding: 10px;
-    height: 450px;
+    height: 350px;
     overflow-y: auto;
     font-family: monospace;
     font-size: 11px;
     white-space: pre-wrap;
-    word-break: break-word;
+    word-break: break-all;
 }
 
-.ok { color: #68d391; }
-.err { color: #fc8181; }
-.info { color: #63b3ed; }
-.warn { color: #f6ad55; }
+.ok {
+    color: #68d391;
+}
+
+.info {
+    color: #63b3ed;
+}
+
+.warn {
+    color: #f6ad55;
+}
+
+.err {
+    color: #fc8181;
+}
+
+.row {
+    margin-top: 5px;
+}
 </style>
 </head>
 
 <body>
 
-<h1>SaucerSwap Scheduled Transaction Test</h1>
+<h1>SaucerSwap Wallet Payer/Sender Test</h1>
 
 <div class="sub">
-Hedera Testnet only.<br>
-This page discovers the injected wallet bridge and displays the
-available Hedera SDK APIs.
+    Hedera Testnet only. This test deliberately separates the connected
+    wallet account from the transaction payer and transfer sender to check
+    whether the wallet bridge preserves transaction identity correctly.
 </div>
 
+<label>Connected wallet account</label>
+<input id="connected"
+       value="0.0.10034285"
+       readonly>
+
+<label>Transaction payer</label>
+<input id="payer"
+       placeholder="Your second testnet account">
+
+<label>Transfer sender</label>
+<input id="sender"
+       placeholder="Your second testnet account">
+
+<label>Recipient</label>
+<input id="recipient"
+       placeholder="Your testnet recipient account">
+
+<label>Amount (tinybars)</label>
+<input id="amount"
+       value="1"
+       inputmode="numeric">
+
 <button id="discover">
-1. Discover Injected Bridge
+    1. Discover Injected Bridge
 </button>
 
 <button id="connect">
-2. Connect Wallet
+    2. Connect Wallet
 </button>
 
-<button id="inspect">
-3. Inspect Hedera SDK
+<button id="build">
+    3. Build Deliberately Mismatched Transaction
 </button>
 
-<button id="test">
-4. Prepare Scheduled Self-Transfer
+<button id="sign" disabled>
+    4. Request Wallet Signature
 </button>
 
-<div style="
-margin-top:12px;
-font-size:12px;
-color:#777;
-line-height:1.6;
-">
-TESTNET ONLY<br>
-Account: 0.0.10034285<br>
-Recipient: 0.0.10034285<br>
-Intended amount: 1 tinybar
+<div class="panel">
+
+    <div class="row">
+        <b>Test property:</b>
+    </div>
+
+    <div class="row">
+        connected account ≠ payer ≠ sender
+    </div>
+
+    <div class="row">
+        The transaction must be interpreted consistently by the
+        webpage, wallet confirmation and signed transaction.
+    </div>
+
 </div>
 
 <div id="log"></div>
 
-
 <script>
 
-/* =====================================================
-   LOGGER
-===================================================== */
+(function () {
 
-var logBox =
-    document.getElementById("log");
+    const logEl = document.getElementById("log");
 
-function log(message, cls) {
+    const discoverBtn = document.getElementById("discover");
+    const connectBtn  = document.getElementById("connect");
+    const buildBtn    = document.getElementById("build");
+    const signBtn     = document.getElementById("sign");
 
-    var line =
-        document.createElement("div");
+    let bridge = null;
+    let connectedAccount = null;
+    let transactionBytes = null;
+    let transactionBase64 = null;
 
-    if (cls) {
-        line.className = cls;
-    }
+    function log(message, cls) {
 
-    line.textContent =
-        "[" +
-        new Date().toLocaleTimeString() +
-        "] " +
-        message;
+        const line = document.createElement("div");
 
-    logBox.appendChild(line);
-
-    logBox.scrollTop =
-        logBox.scrollHeight;
-}
-
-
-/* =====================================================
-   INITIAL STATUS
-===================================================== */
-
-log(
-    "JavaScript loaded successfully.",
-    "ok"
-);
-
-
-/* =====================================================
-   BRIDGE
-===================================================== */
-
-var bridgeName = null;
-
-var bridgeCandidates = [
-    "hashpack",
-    "saucerswapWallet",
-    "hashconnect",
-    "hederaWallet"
-];
-
-
-function inspectBridge(object, name) {
-
-    try {
-
-        var keys =
-            Object.keys(object);
-
-        var prototype =
-            Object.getPrototypeOf(object);
-
-        if (prototype) {
-
-            keys =
-                keys.concat(
-                    Object.getOwnPropertyNames(
-                        prototype
-                    )
-                );
-
+        if (cls) {
+            line.className = cls;
         }
 
-        keys =
-            Array.from(
-                new Set(keys)
-            );
+        line.textContent =
+            "[" +
+            new Date().toLocaleTimeString() +
+            "] " +
+            message;
 
+        logEl.appendChild(line);
 
-        keys.forEach(function(key) {
+        logEl.scrollTop = logEl.scrollHeight;
+    }
 
-            if (key === "constructor") {
-                return;
-            }
+    function stringify(value) {
 
-            var type;
+        try {
+            return JSON.stringify(value);
+        } catch (_) {
+            return String(value);
+        }
+    }
 
-            try {
-                type =
-                    typeof object[key];
-            } catch (e) {
-                type =
-                    "unreadable";
-            }
+    /*
+     * ---------------------------------------------------------
+     * DISCOVER
+     * ---------------------------------------------------------
+     */
 
-            log(
-                "window." +
-                name +
-                "." +
-                key +
-                " -> " +
-                type,
-                "info"
-            );
-
-        });
-
-    } catch (e) {
+    discoverBtn.onclick = function () {
 
         log(
-            "Bridge inspection error: " +
-            e.message,
-            "err"
+            "Scanning for injected wallet bridges...",
+            "info"
         );
 
-    }
-}
+        const candidates = [
+            "hashpack",
+            "saucerswapWallet"
+        ];
 
+        let found = [];
 
-/* =====================================================
-   DISCOVER BUTTON
-===================================================== */
-
-document
-.getElementById("discover")
-.addEventListener(
-"click",
-function() {
-
-    log(
-        "Scanning for wallet bridges...",
-        "info"
-    );
-
-    var found = 0;
-
-    bridgeCandidates.forEach(
-        function(name) {
+        for (const name of candidates) {
 
             try {
 
-                if (
-                    window[name]
-                ) {
+                if (window[name]) {
 
-                    found++;
-
-                    if (!bridgeName) {
-                        bridgeName =
-                            name;
-                    }
+                    found.push(name);
 
                     log(
-                        "FOUND window." +
-                        name,
+                        "FOUND window." + name,
                         "ok"
                     );
 
-                    inspectBridge(
-                        window[name],
-                        name
+                    const obj = window[name];
+
+                    const keys = new Set();
+
+                    Object.keys(obj).forEach(
+                        k => keys.add(k)
                     );
 
+                    try {
+
+                        Object.getOwnPropertyNames(
+                            Object.getPrototypeOf(obj) || {}
+                        ).forEach(
+                            k => keys.add(k)
+                        );
+
+                    } catch (_) {}
+
+                    [...keys]
+                        .filter(
+                            k => k !== "constructor"
+                        )
+                        .forEach(k => {
+
+                            let type;
+
+                            try {
+                                type = typeof obj[k];
+                            } catch (_) {
+                                type = "unreadable";
+                            }
+
+                            log(
+                                "  window." +
+                                name +
+                                "." +
+                                k +
+                                " -> " +
+                                type,
+                                "info"
+                            );
+                        });
                 }
 
             } catch (e) {
 
                 log(
-                    name +
-                    ": " +
+                    "Bridge inspection error: " +
                     e.message,
                     "err"
                 );
-
             }
-
         }
-    );
 
-
-    if (!found) {
-
-        log(
-            "No injected bridge found.",
-            "err"
-        );
-
-    } else {
-
-        log(
-            "Active bridge: " +
-            bridgeName,
-            "ok"
-        );
-
-    }
-
-});
-
-
-/* =====================================================
-   CONNECT BUTTON
-===================================================== */
-
-document
-.getElementById("connect")
-.addEventListener(
-"click",
-async function() {
-
-    if (!bridgeName) {
-
-        log(
-            "Run Discover first.",
-            "err"
-        );
-
-        return;
-    }
-
-
-    var bridge =
-        window[bridgeName];
-
-
-    if (
-        typeof bridge.connect !==
-        "function"
-    ) {
-
-        log(
-            "connect() unavailable.",
-            "err"
-        );
-
-        return;
-    }
-
-
-    try {
-
-        log(
-            "Calling " +
-            bridgeName +
-            ".connect()...",
-            "info"
-        );
-
-
-        var result =
-            await bridge.connect();
-
-
-        log(
-            "Connected: " +
-            JSON.stringify(
-                result
-            ),
-            "ok"
-        );
-
-
-    } catch (e) {
-
-        log(
-            "Connection failed: " +
-            (
-                e.message ||
-                e
-            ),
-            "err"
-        );
-
-    }
-
-});
-
-
-/* =====================================================
-   SDK INSPECTION
-===================================================== */
-
-document
-.getElementById("inspect")
-.addEventListener(
-"click",
-function() {
-
-    log(
-        "==============================",
-        "info"
-    );
-
-    log(
-        "HEDERA SDK INSPECTION",
-        "info"
-    );
-
-    log(
-        "==============================",
-        "info"
-    );
-
-
-    if (
-        !window.HederaSDK
-    ) {
-
-        log(
-            "window.HederaSDK NOT FOUND.",
-            "err"
-        );
-
-        log(
-            "The bundle may not be exporting itself as window.HederaSDK.",
-            "warn"
-        );
-
-        return;
-    }
-
-
-    log(
-        "window.HederaSDK detected.",
-        "ok"
-    );
-
-
-    var sdk =
-        window.HederaSDK;
-
-
-    var exports =
-        Object.keys(
-            sdk
-        ).sort();
-
-
-    log(
-        "Total exports: " +
-        exports.length,
-        "info"
-    );
-
-
-    var interesting = [
-        "Hbar",
-        "HbarUnit",
-        "AccountId",
-        "TransactionId",
-        "TransferTransaction",
-        "ScheduleCreateTransaction",
-        "ScheduleSignTransaction",
-        "ScheduleInfoQuery",
-        "ScheduleInfo"
-    ];
-
-
-    log(
-        "",
-        "info"
-    );
-
-    log(
-        "IMPORTANT EXPORTS:",
-        "warn"
-    );
-
-
-    interesting.forEach(
-        function(name) {
-
-            if (
-                Object.prototype
-                .hasOwnProperty
-                .call(
-                    sdk,
-                    name
-                )
-            ) {
-
-                log(
-                    "AVAILABLE: " +
-                    name,
-                    "ok"
-                );
-
-            } else {
-
-                log(
-                    "MISSING: " +
-                    name,
-                    "err"
-                );
-
-            }
-
-        }
-    );
-
-
-    log(
-        "",
-        "info"
-    );
-
-    log(
-        "ALL SDK EXPORTS:",
-        "info"
-    );
-
-
-    exports.forEach(
-        function(name) {
+        if (!found.length) {
 
             log(
-                "SDK." +
-                name,
+                "No supported bridge detected.",
+                "err"
+            );
+
+            return;
+        }
+
+        /*
+         * Prefer SaucerSwap's alias if present.
+         */
+
+        if (window.saucerswapWallet) {
+
+            bridge = window.saucerswapWallet;
+
+            log(
+                "Active bridge: saucerswapWallet",
+                "ok"
+            );
+
+        } else {
+
+            bridge = window.hashpack;
+
+            log(
+                "Active bridge: hashpack",
+                "ok"
+            );
+        }
+    };
+
+    /*
+     * ---------------------------------------------------------
+     * CONNECT
+     * ---------------------------------------------------------
+     */
+
+    connectBtn.onclick = async function () {
+
+        if (!bridge) {
+
+            log(
+                "Run Discover first.",
+                "err"
+            );
+
+            return;
+        }
+
+        if (
+            typeof bridge.connect !==
+            "function"
+        ) {
+
+            log(
+                "Bridge does not expose connect().",
+                "err"
+            );
+
+            return;
+        }
+
+        try {
+
+            log(
+                "Calling wallet connect()...",
                 "info"
             );
 
+            const result =
+                await bridge.connect();
+
+            log(
+                "Connect response: " +
+                stringify(result),
+                "ok"
+            );
+
+            if (
+                result &&
+                result.accountId
+            ) {
+
+                connectedAccount =
+                    result.accountId;
+
+                document.getElementById(
+                    "connected"
+                ).value =
+                    connectedAccount;
+
+                log(
+                    "Connected account = " +
+                    connectedAccount,
+                    "ok"
+                );
+            }
+
+        } catch (e) {
+
+            log(
+                "connect() failed: " +
+                e.message,
+                "err"
+            );
         }
-    );
-
-
-});
-
-
-/* =====================================================
-   PREPARE TEST
-===================================================== */
-
-document
-.getElementById("test")
-.addEventListener(
-"click",
-function() {
-
-    log(
-        "Preparing scheduled self-transfer...",
-        "info"
-    );
-
-
-    if (
-        !window.HederaSDK
-    ) {
-
-        log(
-            "HederaSDK unavailable.",
-            "err"
-        );
-
-        return;
-    }
-
-
-    var sdk =
-        window.HederaSDK;
-
+    };
 
     /*
-     * Don't guess the SDK API.
-     * Display exactly what is available.
+     * ---------------------------------------------------------
+     * BUILD
+     * ---------------------------------------------------------
      */
 
-    if (
-        !sdk.ScheduleCreateTransaction
-    ) {
+    buildBtn.onclick = function () {
+
+        if (!window.HederaSDK) {
+
+            log(
+                "window.HederaSDK is unavailable.",
+                "err"
+            );
+
+            return;
+        }
+
+        const SDK =
+            window.HederaSDK;
+
+        if (
+            typeof SDK.TransferTransaction !==
+            "function"
+        ) {
+
+            log(
+                "TransferTransaction unavailable.",
+                "err"
+            );
+
+            return;
+        }
+
+        if (
+            typeof SDK.AccountId !==
+            "function"
+        ) {
+
+            log(
+                "AccountId unavailable.",
+                "err"
+            );
+
+            return;
+        }
+
+        const payer =
+            document.getElementById(
+                "payer"
+            ).value.trim();
+
+        const sender =
+            document.getElementById(
+                "sender"
+            ).value.trim();
+
+        const recipient =
+            document.getElementById(
+                "recipient"
+            ).value.trim();
+
+        const amountText =
+            document.getElementById(
+                "amount"
+            ).value.trim();
+
+        if (!payer || !sender || !recipient) {
+
+            log(
+                "Enter your testnet payer, sender and recipient.",
+                "err"
+            );
+
+            return;
+        }
+
+        if (!/^\d+$/.test(amountText)) {
+
+            log(
+                "Amount must be an integer number of tinybars.",
+                "err"
+            );
+
+            return;
+        }
+
+        try {
+
+            const payerId =
+                SDK.AccountId.fromString(
+                    payer
+                );
+
+            const senderId =
+                SDK.AccountId.fromString(
+                    sender
+                );
+
+            const recipientId =
+                SDK.AccountId.fromString(
+                    recipient
+                );
+
+            const amount =
+                Number(amountText);
+
+            if (!Number.isSafeInteger(amount)) {
+
+                throw new Error(
+                    "Amount is outside JavaScript's safe integer range."
+                );
+            }
+
+            /*
+             * IMPORTANT:
+             *
+             * This transaction intentionally separates:
+             *
+             * payer
+             * sender
+             * recipient
+             *
+             * The payer is assigned using the transaction ID,
+             * while the HBAR transfer explicitly uses sender.
+             */
+
+            const tx =
+                new SDK.TransferTransaction()
+                    .addHbarTransfer(
+                        senderId,
+                        -amount
+                    )
+                    .addHbarTransfer(
+                        recipientId,
+                        amount
+                    )
+                    .setTransactionId(
+                        SDK.TransactionId.generate(
+                            payerId
+                        )
+                    )
+                    .setNodeAccountIds([
+                        SDK.AccountId.fromString(
+                            "0.0.3"
+                        )
+                    ])
+                    .setMaxTransactionFee(
+                        100000000
+                    )
+                    .freeze();
+
+            transactionBytes =
+                tx.toBytes();
+
+            let binary = "";
+
+            for (
+                let i = 0;
+                i < transactionBytes.length;
+                i++
+            ) {
+
+                binary += String.fromCharCode(
+                    transactionBytes[i]
+                );
+            }
+
+            transactionBase64 =
+                btoa(binary);
+
+            log(
+                "==============================",
+                "info"
+            );
+
+            log(
+                "TRANSACTION PREPARED",
+                "info"
+            );
+
+            log(
+                "Connected wallet : " +
+                (connectedAccount || "unknown"),
+                "info"
+            );
+
+            log(
+                "Transaction payer : " +
+                payer,
+                "info"
+            );
+
+            log(
+                "Transfer sender   : " +
+                sender,
+                "info"
+            );
+
+            log(
+                "Recipient          : " +
+                recipient,
+                "info"
+            );
+
+            log(
+                "Amount             : " +
+                amount +
+                " tinybar",
+                "info"
+            );
+
+            log(
+                "Serialized length  : " +
+                transactionBytes.length +
+                " bytes",
+                "info"
+            );
+
+            log(
+                "Transaction ID generated for payer: " +
+                payer,
+                "info"
+            );
+
+            log(
+                "==============================",
+                "info"
+            );
+
+            log(
+                "The next step requests wallet signing.",
+                "warn"
+            );
+
+            signBtn.disabled = false;
+
+        } catch (e) {
+
+            log(
+                "Transaction construction failed: " +
+                e.message,
+                "err"
+            );
+        }
+    };
+
+    /*
+     * ---------------------------------------------------------
+     * SIGN
+     * ---------------------------------------------------------
+     */
+
+    signBtn.onclick = async function () {
+
+        if (!bridge) {
+
+            log(
+                "No active wallet bridge.",
+                "err"
+            );
+
+            return;
+        }
+
+        if (!transactionBase64) {
+
+            log(
+                "Build the transaction first.",
+                "err"
+            );
+
+            return;
+        }
+
+        if (
+            typeof bridge.signTransaction !==
+            "function"
+        ) {
+
+            log(
+                "signTransaction() unavailable.",
+                "err"
+            );
+
+            return;
+        }
 
         log(
-            "ScheduleCreateTransaction is not exported by this bundle.",
-            "err"
+            "Calling signTransaction()...",
+            "info"
         );
 
         log(
-            "Run SDK inspection and provide the output.",
+            "WATCH THE WALLET CONFIRMATION.",
             "warn"
         );
 
-        return;
-    }
-
-
-    if (
-        !sdk.TransferTransaction
-    ) {
-
         log(
-            "TransferTransaction unavailable.",
-            "err"
-        );
-
-        return;
-    }
-
-
-    if (
-        !sdk.AccountId
-    ) {
-
-        log(
-            "AccountId unavailable.",
-            "err"
-        );
-
-        return;
-    }
-
-
-    /*
-     * Verify Hbar API before constructing
-     * an amount.
-     */
-
-    if (
-        !sdk.Hbar ||
-        typeof sdk.Hbar.fromTinybars !==
-        "function"
-    ) {
-
-        log(
-            "Hbar.fromTinybars() unavailable.",
-            "err"
-        );
-
-        log(
-            "Not constructing a transaction with a plain numeric amount.",
+            "Record exactly what account the popup identifies as payer/sender.",
             "warn"
         );
 
-        return;
-    }
+        try {
 
+            const result =
+                await bridge.signTransaction(
+                    transactionBase64
+                );
+
+            log(
+                "==============================",
+                "ok"
+            );
+
+            log(
+                "SIGNING RESPONSE RECEIVED",
+                "ok"
+            );
+
+            log(
+                stringify(result),
+                "ok"
+            );
+
+            log(
+                "==============================",
+                "ok"
+            );
+
+            /*
+             * We intentionally don't automatically submit
+             * anything after signing.
+             */
+
+            log(
+                "No automatic submission performed.",
+                "info"
+            );
+
+        } catch (e) {
+
+            log(
+                "Wallet rejected/failed signing: " +
+                e.message,
+                "warn"
+            );
+        }
+    };
+
+    /*
+     * ---------------------------------------------------------
+     * INITIAL MESSAGE
+     * ---------------------------------------------------------
+     */
 
     log(
-        "Required SDK APIs are present.",
+        "JavaScript loaded successfully.",
         "ok"
     );
 
+    log(
+        "Testnet-only payer/sender mismatch test ready.",
+        "info"
+    );
 
-    try {
-
-        var account =
-            sdk.AccountId.fromString(
-                "0.0.10034285"
-            );
-
-
-        var amount =
-            sdk.Hbar.fromTinybars(
-                "1"
-            );
-
-
-        var negative =
-            sdk.Hbar.fromTinybars(
-                "-1"
-            );
-
-
-        log(
-            "Amount: exactly 1 tinybar.",
-            "ok"
-        );
-
-        log(
-            "HBAR value: 0.00000001 HBAR.",
-            "info"
-        );
-
-
-        /*
-         * Underlying self-transfer.
-         */
-
-        var transfer =
-            new sdk.TransferTransaction()
-                .addHbarTransfer(
-                    account,
-                    negative
-                )
-                .addHbarTransfer(
-                    account,
-                    amount
-                );
-
-
-        log(
-            "Underlying self-transfer constructed.",
-            "ok"
-        );
-
-
-        /*
-         * ScheduleCreate.
-         */
-
-        var schedule =
-            new sdk.ScheduleCreateTransaction()
-                .setScheduledTransaction(
-                    transfer
-                );
-
-
-        log(
-            "ScheduleCreate constructed.",
-            "ok"
-        );
-
-
-        /*
-         * Serialize only.
-         */
-
-        var frozen =
-            schedule.freeze();
-
-
-        var bytes =
-            frozen.toBytes();
-
-
-        log(
-            "Serialized transaction: " +
-            bytes.length +
-            " bytes.",
-            "info"
-        );
-
-
-        log(
-            "================================",
-            "ok"
-        );
-
-        log(
-            "SCHEDULED SELF-TRANSFER READY",
-            "ok"
-        );
-
-        log(
-            "================================",
-            "ok"
-        );
-
-
-        log(
-            "Account: 0.0.10034285",
-            "info"
-        );
-
-        log(
-            "Recipient: 0.0.10034285",
-            "info"
-        );
-
-        log(
-            "Amount: 1 tinybar",
-            "info"
-        );
-
-
-        log(
-            "No transaction was submitted.",
-            "warn"
-        );
-
-
-    } catch (e) {
-
-        log(
-            "Construction error: " +
-            (
-                e.message ||
-                e
-            ),
-            "err"
-        );
-
-    }
-
-});
-
+})();
 
 </script>
 
