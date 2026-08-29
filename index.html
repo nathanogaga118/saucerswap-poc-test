@@ -528,6 +528,18 @@ button:disabled {
             return;
         }
 
+        if (!connectedAccount) {
+
+            log(
+                "Connect the wallet first - the creator " +
+                "account is needed to generate a TransactionId " +
+                "for the ScheduleCreateTransaction.",
+                "err"
+            );
+
+            return;
+        }
+
         if (!/^\d+$/.test(amountText)) {
 
             log(
@@ -611,6 +623,23 @@ button:disabled {
                         schedulePayerId
                     );
             }
+
+            /*
+             * The ScheduleCreateTransaction itself needs a
+             * TransactionId before it can be frozen without a
+             * client. This identifies the creator - the account
+             * that submits/pays for creating the schedule entry
+             * - which is the connected account, not the schedule
+             * payer and not the inner sender.
+             */
+
+            const creatorId =
+                SDK.AccountId.fromString(connectedAccount);
+
+            scheduleCreateTx =
+                scheduleCreateTx.setTransactionId(
+                    SDK.TransactionId.generate(creatorId)
+                );
 
             scheduleCreateTx =
                 scheduleCreateTx
@@ -832,4 +861,4 @@ button:disabled {
 </script>
 
 </body>
-  </html>
+    </html>
