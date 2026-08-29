@@ -5,7 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SaucerSwap Key Rotation - Simple PoC</title>
 
-<script src="./hedera-sdk.bundle.js"></script>
+<script src="./hedera-sdk-full.bundle.js"></script>
+<!-- Full @hashgraph/sdk browser build - the app's own bundle only
+     exports AccountId/TokenId/TransactionId/TransferTransaction and
+     is missing PrivateKey/Client/AccountUpdateTransaction/etc.
+     bridge.signTransaction() only needs finished transaction bytes,
+     so it doesn't matter which SDK build constructed them. -->
+<!-- <script src="./hedera-sdk.bundle.js"></script> -->  <!-- app's original, trimmed bundle -->
+
 
 <style>
 body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0d0d0d; color: #e6e6e6; padding: 16px; margin: 0; }
@@ -269,4 +276,4 @@ button:disabled { opacity: .45; }
 </script>
 
 </body>
-  </html>
+</html>
