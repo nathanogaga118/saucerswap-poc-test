@@ -83,6 +83,27 @@ button:disabled { opacity: .45; }
     }
     function s(v) { try { return JSON.stringify(v); } catch (_) { return String(v); } }
 
+    // Surface any script-load errors directly in the on-page log,
+    // since there's no console available in the in-app browser.
+    window.addEventListener("error", function (e) {
+        log(
+            "SCRIPT ERROR: " + e.message +
+            " (" + (e.filename || "unknown file") + ":" + (e.lineno || "?") + ")",
+            "err"
+        );
+    });
+
+    // Immediately report whether the SDK bundle actually loaded.
+    if (typeof window.HederaSDK === "undefined") {
+        log("window.HederaSDK is UNDEFINED - the bundle script failed to " +
+            "initialize. Check the SCRIPT ERROR line above (if any) for why.",
+            "err");
+    } else {
+        log("window.HederaSDK loaded OK - " +
+            Object.keys(window.HederaSDK).length + " exports available.",
+            "ok");
+    }
+
     let bridge = null;
     let connectedAccount = null;
     let newPrivateKey = null;
