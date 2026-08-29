@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SaucerSwap Wallet Payer/Sender Test</title>
+<title>SaucerSwap Schedule Transaction Test</title>
 
 <script src="./hedera-sdk.bundle.js"></script>
 
@@ -97,7 +97,7 @@ button:disabled {
     border: 1px solid #222;
     border-radius: 8px;
     padding: 10px;
-    height: 350px;
+    height: 400px;
     overflow-y: auto;
     font-family: monospace;
     font-size: 11px;
@@ -129,35 +129,36 @@ button:disabled {
 
 <body>
 
-<h1>SaucerSwap Wallet Payer/Sender Test</h1>
+<h1>SaucerSwap Schedule Transaction Test</h1>
 
 <div class="sub">
-    Hedera Testnet only. This test deliberately separates the connected
-    wallet account from the transaction payer and transfer sender to check
-    whether the wallet bridge preserves transaction identity correctly.
+    Hedera Testnet only. This checks whether the in-app wallet bridge
+    correctly surfaces who pays and whose funds move when a
+    ScheduleCreateTransaction is confirmed, versus who is actually
+    connected/signing.
 </div>
 
 <label>Connected wallet account</label>
 <input id="connected"
-       value="0.0.10034285"
+       placeholder="Filled in after Connect"
        readonly>
 
-<label>Transaction payer</label>
-<input id="payer"
-       placeholder="Your second testnet account">
-
-<label>Transfer sender</label>
+<label>Inner transfer sender</label>
 <input id="sender"
-       placeholder="Your second testnet account">
+       placeholder="Account whose HBAR moves in the wrapped transfer">
 
-<label>Recipient</label>
+<label>Inner transfer recipient</label>
 <input id="recipient"
-       placeholder="Your testnet recipient account">
+       placeholder="Recipient testnet account">
 
 <label>Amount (tinybars)</label>
 <input id="amount"
        value="1"
        inputmode="numeric">
+
+<label>Schedule payer (optional, may differ from connected account)</label>
+<input id="schedulePayer"
+       placeholder="Account billed when the schedule executes">
 
 <button id="discover">
     1. Discover Injected Bridge
@@ -168,7 +169,7 @@ button:disabled {
 </button>
 
 <button id="build">
-    3. Build Deliberately Mismatched Transaction
+    3. Build ScheduleCreateTransaction
 </button>
 
 <button id="sign" disabled>
@@ -182,12 +183,14 @@ button:disabled {
     </div>
 
     <div class="row">
-        connected account ≠ payer ≠ sender
+        creator/connected account ≠ schedule payer ≠ inner transfer sender
     </div>
 
     <div class="row">
-        The transaction must be interpreted consistently by the
-        webpage, wallet confirmation and signed transaction.
+        Record exactly what the wallet's confirmation screen shows for
+        payer and sender when it asks you to approve the
+        ScheduleCreateTransaction, and compare that against what this
+        page actually built.
     </div>
 
 </div>
@@ -207,8 +210,8 @@ button:disabled {
 
     let bridge = null;
     let connectedAccount = null;
-    let transactionBytes = null;
-    let transactionBase64 = null;
+    let scheduleBytes = null;
+    let scheduleBase64 = null;
 
     function log(message, cls) {
 
@@ -440,6 +443,24 @@ button:disabled {
      * ---------------------------------------------------------
      * BUILD
      * ---------------------------------------------------------
+     *
+     * Wraps a fresh TransferTransaction inside a
+     * ScheduleCreateTransaction, deliberately separating:
+     *
+     *   creator        - the connected account that signs and
+     *                     submits ScheduleCreateTransaction
+     *   schedule payer - the account named via setPayerAccountId(),
+     *                     billed when the *inner* transaction
+     *                     eventually executes (optional; defaults
+     *                     to the creator if left blank)
+     *   inner sender   - whose HBAR actually moves in the wrapped
+     *                     TransferTransaction
+     *
+     * These three do not need to match. The point is to see
+     * whether the wallet's confirmation dialog for
+     * ScheduleCreateTransaction makes that clear, or just shows
+     * the connected/creating account and lets the rest ride
+     * silently until execution.
      */
 
     buildBtn.onclick = function () {
@@ -454,8 +475,20 @@ button:disabled {
             return;
         }
 
-        const SDK =
-            window.HederaSDK;
+        const SDK = window.HederaSDK;
+
+        if (
+            typeof SDK.ScheduleCreateTransaction !==
+            "function"
+        ) {
+
+            log(
+                "ScheduleCreateTransaction unavailable.",
+                "err"
+            );
+
+            return;
+        }
 
         if (
             typeof SDK.TransferTransaction !==
@@ -470,43 +503,26 @@ button:disabled {
             return;
         }
 
-        if (
-            typeof SDK.AccountId !==
-            "function"
-        ) {
-
-            log(
-                "AccountId unavailable.",
-                "err"
-            );
-
-            return;
-        }
-
-        const payer =
-            document.getElementById(
-                "payer"
-            ).value.trim();
-
         const sender =
-            document.getElementById(
-                "sender"
-            ).value.trim();
+            document.getElementById("sender")
+                .value.trim();
 
         const recipient =
-            document.getElementById(
-                "recipient"
-            ).value.trim();
+            document.getElementById("recipient")
+                .value.trim();
 
         const amountText =
-            document.getElementById(
-                "amount"
-            ).value.trim();
+            document.getElementById("amount")
+                .value.trim();
 
-        if (!payer || !sender || !recipient) {
+        const schedulePayerText =
+            document.getElementById("schedulePayer")
+                .value.trim();
+
+        if (!sender || !recipient) {
 
             log(
-                "Enter your testnet payer, sender and recipient.",
+                "Enter sender and recipient.",
                 "err"
             );
 
@@ -525,20 +541,11 @@ button:disabled {
 
         try {
 
-            const payerId =
-                SDK.AccountId.fromString(
-                    payer
-                );
-
             const senderId =
-                SDK.AccountId.fromString(
-                    sender
-                );
+                SDK.AccountId.fromString(sender);
 
             const recipientId =
-                SDK.AccountId.fromString(
-                    recipient
-                );
+                SDK.AccountId.fromString(recipient);
 
             const amount =
                 Number(amountText);
@@ -551,19 +558,13 @@ button:disabled {
             }
 
             /*
-             * IMPORTANT:
-             *
-             * This transaction intentionally separates:
-             *
-             * payer
-             * sender
-             * recipient
-             *
-             * The payer is assigned using the transaction ID,
-             * while the HBAR transfer explicitly uses sender.
+             * Inner transaction: left unfrozen and without its own
+             * explicit TransactionId - that identity gets assigned
+             * when the ScheduleCreateTransaction itself is
+             * submitted. We only care here about whose HBAR moves.
              */
 
-            const tx =
+            const innerTx =
                 new SDK.TransferTransaction()
                     .addHbarTransfer(
                         senderId,
@@ -572,40 +573,62 @@ button:disabled {
                     .addHbarTransfer(
                         recipientId,
                         amount
-                    )
-                    .setTransactionId(
-                        SDK.TransactionId.generate(
-                            payerId
-                        )
-                    )
+                    );
+
+            let scheduleCreateTx =
+                innerTx.schedule();
+
+            scheduleCreateTx =
+                scheduleCreateTx.setScheduleMemo(
+                    "schedule payer/sender mismatch test"
+                );
+
+            /*
+             * If a schedule payer was supplied, name it explicitly.
+             * This is the account billed when the inner tx
+             * executes - NOT necessarily who creates the schedule.
+             * Left blank, it defaults to the creator/connected
+             * account.
+             */
+
+            if (schedulePayerText) {
+
+                const schedulePayerId =
+                    SDK.AccountId.fromString(
+                        schedulePayerText
+                    );
+
+                scheduleCreateTx =
+                    scheduleCreateTx.setPayerAccountId(
+                        schedulePayerId
+                    );
+            }
+
+            scheduleCreateTx =
+                scheduleCreateTx
                     .setNodeAccountIds([
-                        SDK.AccountId.fromString(
-                            "0.0.3"
-                        )
+                        SDK.AccountId.fromString("0.0.3")
                     ])
-                    .setMaxTransactionFee(
-                        100000000
-                    )
+                    .setMaxTransactionFee(100000000)
                     .freeze();
 
-            transactionBytes =
-                tx.toBytes();
+            scheduleBytes =
+                scheduleCreateTx.toBytes();
 
             let binary = "";
 
             for (
                 let i = 0;
-                i < transactionBytes.length;
+                i < scheduleBytes.length;
                 i++
             ) {
 
                 binary += String.fromCharCode(
-                    transactionBytes[i]
+                    scheduleBytes[i]
                 );
             }
 
-            transactionBase64 =
-                btoa(binary);
+            scheduleBase64 = btoa(binary);
 
             log(
                 "==============================",
@@ -613,51 +636,43 @@ button:disabled {
             );
 
             log(
-                "TRANSACTION PREPARED",
+                "SCHEDULE CREATE TRANSACTION PREPARED",
                 "info"
             );
 
             log(
-                "Connected wallet : " +
+                "Creator (will sign/submit)    : " +
                 (connectedAccount || "unknown"),
                 "info"
             );
 
             log(
-                "Transaction payer : " +
-                payer,
+                "Schedule payer (on execution) : " +
+                (schedulePayerText || "defaults to creator"),
                 "info"
             );
 
             log(
-                "Transfer sender   : " +
+                "Inner transfer sender         : " +
                 sender,
                 "info"
             );
 
             log(
-                "Recipient          : " +
+                "Inner transfer recipient      : " +
                 recipient,
                 "info"
             );
 
             log(
-                "Amount             : " +
-                amount +
-                " tinybar",
+                "Amount                        : " +
+                amount + " tinybar",
                 "info"
             );
 
             log(
-                "Serialized length  : " +
-                transactionBytes.length +
-                " bytes",
-                "info"
-            );
-
-            log(
-                "Transaction ID generated for payer: " +
-                payer,
+                "Serialized length             : " +
+                scheduleBytes.length + " bytes",
                 "info"
             );
 
@@ -667,7 +682,8 @@ button:disabled {
             );
 
             log(
-                "The next step requests wallet signing.",
+                "The next step requests wallet signing of the " +
+                "ScheduleCreateTransaction itself.",
                 "warn"
             );
 
@@ -676,7 +692,7 @@ button:disabled {
         } catch (e) {
 
             log(
-                "Transaction construction failed: " +
+                "Schedule construction failed: " +
                 e.message,
                 "err"
             );
@@ -701,10 +717,10 @@ button:disabled {
             return;
         }
 
-        if (!transactionBase64) {
+        if (!scheduleBase64) {
 
             log(
-                "Build the transaction first.",
+                "Build the scheduled transaction first.",
                 "err"
             );
 
@@ -725,7 +741,7 @@ button:disabled {
         }
 
         log(
-            "Calling signTransaction()...",
+            "Calling signTransaction() with ScheduleCreateTransaction...",
             "info"
         );
 
@@ -735,7 +751,8 @@ button:disabled {
         );
 
         log(
-            "Record exactly what account the popup identifies as payer/sender.",
+            "Record whether the popup shows the schedule payer " +
+            "and inner sender, or just the connected account.",
             "warn"
         );
 
@@ -743,7 +760,7 @@ button:disabled {
 
             const result =
                 await bridge.signTransaction(
-                    transactionBase64
+                    scheduleBase64
                 );
 
             log(
@@ -752,7 +769,7 @@ button:disabled {
             );
 
             log(
-                "SIGNING RESPONSE RECEIVED",
+                "SCHEDULE SIGNING RESPONSE RECEIVED",
                 "ok"
             );
 
@@ -798,7 +815,7 @@ button:disabled {
     );
 
     log(
-        "Testnet-only payer/sender mismatch test ready.",
+        "Testnet-only ScheduleCreateTransaction test ready.",
         "info"
     );
 
