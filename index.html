@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SaucerSwap Key Rotation - Simple PoC</title>
 
-<script src="./hedera-sdk-full.bundle.js"></script>
+<script>window.__sdkScriptFailed = false;</script>
+<script src="./hedera-sdk-full.bundle.js"
+        onerror="window.__sdkScriptFailed = true;"></script>
 <!-- Full @hashgraph/sdk browser build - the app's own bundle only
      exports AccountId/TokenId/TransactionId/TransferTransaction and
      is missing PrivateKey/Client/AccountUpdateTransaction/etc.
@@ -85,23 +87,38 @@ button:disabled { opacity: .45; }
 
     // Surface any script-load errors directly in the on-page log,
     // since there's no console available in the in-app browser.
+    // capture:true is required to catch <script src> load failures,
+    // which don't bubble the way normal runtime errors do.
     window.addEventListener("error", function (e) {
         log(
-            "SCRIPT ERROR: " + e.message +
-            " (" + (e.filename || "unknown file") + ":" + (e.lineno || "?") + ")",
+            "SCRIPT ERROR: " + (e.message || "(resource load error)") +
+            " (" + (e.filename || (e.target && e.target.src) || "unknown file") +
+            ":" + (e.lineno || "?") + ")",
             "err"
         );
-    });
+    }, true);
 
     // Immediately report whether the SDK bundle actually loaded.
-    if (typeof window.HederaSDK === "undefined") {
-        log("window.HederaSDK is UNDEFINED - the bundle script failed to " +
-            "initialize. Check the SCRIPT ERROR line above (if any) for why.",
-            "err");
+    if (window.__sdkScriptFailed) {
+        log(
+            "hedera-sdk-full.bundle.js FAILED TO LOAD (404 or wrong path). " +
+            "Confirm the file is in the SAME folder as this HTML file and " +
+            "named exactly 'hedera-sdk-full.bundle.js'.",
+            "err"
+        );
+    } else if (typeof window.HederaSDK === "undefined") {
+        log(
+            "hedera-sdk-full.bundle.js loaded (no 404) but window.HederaSDK " +
+            "is still undefined - it likely threw during initialization. " +
+            "Check for a SCRIPT ERROR line above.",
+            "err"
+        );
     } else {
-        log("window.HederaSDK loaded OK - " +
+        log(
+            "window.HederaSDK loaded OK - " +
             Object.keys(window.HederaSDK).length + " exports available.",
-            "ok");
+            "ok"
+        );
     }
 
     let bridge = null;
